@@ -1,0 +1,23 @@
+# Binaries and build artifacts
+tmp/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+build-errors.log
+
+# Environment files
+.env.local
+.env.*.local
+
+# Dependency directories
+vendor/
+
+# IDE / Editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+
+token.md
