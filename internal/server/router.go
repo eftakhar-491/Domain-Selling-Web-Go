@@ -25,5 +25,5 @@ func Routes(r *echo.Group, db *gorm.DB, redisClient *redis.Client) {
 	// Domain route groups
 	auth.AuthRoutes(r.Group("/auth"), db, redisClient)
 	user.UserRoutes(r.Group("/user"), db)
-	find_domain.DomainRoutes(r.Group("/find-domain"), db)
+	find_domain.DomainRoutes(r.Group("/find-domain"))
 }

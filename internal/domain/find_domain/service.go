@@ -60,19 +60,6 @@ type BulkSearchRequest struct {
 	DomainName string `json:"domainName"`
 }
 
-// ============================================================
-// SINGLE SEARCH
-// ============================================================
-
-// Search searches a single domain.
-//
-// eftakhar.com
-//
-//	-> eftakhar.com
-//
-// eftakhar
-//
-//	-> eftakhar.com
 func (s *DomainService) Search(query string) (interface{}, error) {
 
 	domain := cleanDomain(query)
@@ -99,23 +86,7 @@ func (s *DomainService) Search(query string) (interface{}, error) {
 	)
 }
 
-// ============================================================
-// BULK SEARCH
-// ============================================================
 
-// BulkSearch searches multiple TLDs.
-//
-// Input:
-//
-// eftakhar
-//
-// Generates:
-//
-// eftakhar.com
-// eftakhar.net
-// eftakhar.info
-// eftakhar.xyz
-// eftakhar.dev
 func (s *DomainService) BulkSearch(query string) (interface{}, error) {
 
 	domain := cleanDomain(query)
@@ -290,14 +261,6 @@ func (s *DomainService) callDomainAPI(
 // ============================================================
 // HELPERS
 // ============================================================
-
-// cleanDomain cleans user input.
-//
-// https://www.eftakhar.com/
-//
-//	↓
-//
-// eftakhar.com
 func cleanDomain(query string) string {
 
 	q := strings.TrimSpace(
@@ -312,12 +275,6 @@ func cleanDomain(query string) string {
 
 	return q
 }
-
-// hasTLD checks whether the user provided a TLD.
-//
-// eftakhar       -> false
-// eftakhar.com   -> true
-// eftakhar.dev   -> true
 func hasTLD(domain string) bool {
 
 	parts := strings.Split(domain, ".")
