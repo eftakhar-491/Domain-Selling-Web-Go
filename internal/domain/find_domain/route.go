@@ -10,5 +10,5 @@ func DomainRoutes(r *echo.Group) {
 	handler := NewDomainHandler(service)
 
 	r.GET("/search", handler.Search)
-	r.POST("/bulk-search", handler.BulkSearch)
+	r.GET("/bulk-search", handler.BulkSearch)
 }

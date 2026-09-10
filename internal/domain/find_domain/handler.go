@@ -1,8 +1,8 @@
 package find_domain
 
 import (
+	"fmt"
 	"net/http"
-
 	"project-setup/internal/pkg/utils"
 
 	"github.com/labstack/echo/v5"
@@ -19,6 +19,7 @@ func NewDomainHandler(service *DomainService) *DomainHandler {
 		service: service,
 	}
 }
+
 // Search
 // GET /api/v1/find-domain/search?query=eftakhar
 // GET /api/v1/find-domain/search?domain=eftakhar.com
@@ -29,7 +30,7 @@ func (h *DomainHandler) Search(c *echo.Context) error {
 	if query == "" {
 		query = c.QueryParam("domain")
 	}
-
+	fmt.Println("Search query: ", query)
 	if query == "" {
 		return utils.ErrorResponse(
 			c,
@@ -56,35 +57,24 @@ func (h *DomainHandler) Search(c *echo.Context) error {
 }
 
 // BulkSearch
-//
-// POST /api/v1/find-domain/bulk-search
-//
-// Body:
-//
-//	{
-//	  "domainName": "eftakhar"
-//	}
+// GET /api/v1/find-domain/bulk-search?domain=eftakhar
+// GET /api/v1/find-domain/bulk-search?query=eftakhar
 func (h *DomainHandler) BulkSearch(c *echo.Context) error {
 
-	var req BulkSearchRequest
+	domain := c.QueryParam("domain")
+	if domain == "" {
+		domain = c.QueryParam("query")
+	}
 
-	if err := c.Bind(&req); err != nil {
+	if domain == "" {
 		return utils.ErrorResponse(
 			c,
 			http.StatusBadRequest,
-			"Invalid request body",
+			"domain=example or query=example parameter is required",
 		)
 	}
 
-	if req.DomainName == "" {
-		return utils.ErrorResponse(
-			c,
-			http.StatusBadRequest,
-			"domainName is required",
-		)
-	}
-
-	result, err := h.service.BulkSearch(req.DomainName)
+	result, err := h.service.BulkSearch(domain)
 	if err != nil {
 		return utils.ErrorResponse(
 			c,

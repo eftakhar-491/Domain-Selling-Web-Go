@@ -61,12 +61,24 @@ type BulkSearchRequest struct {
 	DomainName string `json:"domainName"`
 }
 
+func hasTLD(domain string) bool {
+	parts := strings.Split(domain, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	if parts[0] == "" ||
+		parts[len(parts)-1] == "" {
+		return false
+	}
+	return true
+}
+
 func (s *DomainService) Search(query string) (interface{}, error) {
 
-	domain := cleanDomain(query)
+	domain := query
 
 	if domain == "" {
-		return nil, errors.New("search query cannot be empty")
+		return nil, errors.New("search query or domain cannot be empty")
 	}
 
 	// If user doesn't provide TLD,
@@ -79,15 +91,148 @@ func (s *DomainService) Search(query string) (interface{}, error) {
 		DomainName: domain,
 	}
 
-	return s.callDomainAPI(
-		"/domains/search",
-		payload,
+	// Convert payload to JSON
+	jsonData, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to marshal request: %w",
+			err,
+		)
+	}
+
+	baseURL := os.Getenv("DNA_BASE_URL")
+	if baseURL == "" {
+		baseURL = domainAPIBaseURL
+	}
+	rID := os.Getenv("DNA_RESELLER_ID")
+	if rID == "" {
+		rID = resellerID
+	}
+	key := os.Getenv("DNA_API_KEY")
+	if key == "" {
+		key = apiKey
+	}
+	// Full URL
+	url := baseURL + "/domains/search"
+	// Create HTTP request
+	req, err := http.NewRequest(
+		http.MethodPost,
+		url,
+		bytes.NewBuffer(jsonData),
 	)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to create request: %w",
+			err,
+		)
+	}
+	// HEADERS
+	req.Header.Set(
+		"Content-Type",
+		"application/json",
+	)
+
+	req.Header.Set(
+		"Accept",
+		"application/json",
+	)
+
+	req.Header.Set(
+		"__reseller",
+		rID,
+	)
+
+	req.Header.Set(
+		"X-API-KEY",
+		key,
+	)
+
+	req.Header.Set(
+		"User-Agent",
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+	)
+	// SEND REQUEST
+	resp, err := s.client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to connect to domain API: %w",
+			err,
+		)
+	}
+	defer resp.Body.Close()
+	// READ RESPONSE
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"failed to read domain API response: %w",
+			err,
+		)
+	}
+	// CHECK STATUS
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return nil, fmt.Errorf(
+			"domain API returned status %d: %s",
+			resp.StatusCode,
+			string(body),
+		)
+	}
+	// PARSE JSON
+	var result interface{}
+
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, fmt.Errorf(
+			"failed to parse domain API response: %w",
+			err,
+		)
+	}
+
+	return result, nil
 }
-func (s *DomainService) callDomainAPI(
-	endpoint string,
-	payload interface{},
-) (interface{}, error) {
+
+func cleanDomain(query string) string {
+
+	q := strings.TrimSpace(
+		strings.ToLower(query),
+	)
+
+	q = strings.TrimPrefix(q, "http://")
+	q = strings.TrimPrefix(q, "https://")
+	q = strings.TrimPrefix(q, "www.")
+
+	q = strings.TrimSuffix(q, "/")
+
+	return q
+}
+
+func (s *DomainService) BulkSearch(query string) (interface{}, error) {
+	domain := query
+	if domain == "" {
+		return nil, errors.New("domain name cannot be empty")
+	}
+	if hasTLD(domain) {
+		return map[string]interface{}{
+			"domainName": domain,
+			"searched":   false,
+			"message":    "Top-level domain already provided",
+			"results": []DomainAPIRequest{
+				{
+					DomainName: domain,
+				},
+			},
+		}, nil
+	}
+	// Generate domains
+	payload := make([]DomainAPIRequest, 0, len(supportedTLDs))
+
+	for _, tld := range supportedTLDs {
+		payload = append(
+			payload,
+			DomainAPIRequest{
+				DomainName: domain + tld,
+			},
+		)
+	}
+	// Call external bulk API
 
 	// Convert payload to JSON
 	jsonData, err := json.Marshal(payload)
@@ -112,7 +257,7 @@ func (s *DomainService) callDomainAPI(
 	}
 
 	// Full URL
-	url := baseURL + endpoint
+	url := baseURL + "/domains/bulk-search"
 
 	// Create HTTP request
 	req, err := http.NewRequest(
@@ -155,11 +300,7 @@ func (s *DomainService) callDomainAPI(
 		"User-Agent",
 		"Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
 	)
-
-	// ========================================================
 	// SEND REQUEST
-	// ========================================================
-
 	resp, err := s.client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf(
@@ -170,9 +311,7 @@ func (s *DomainService) callDomainAPI(
 
 	defer resp.Body.Close()
 
-	// ========================================================
 	// READ RESPONSE
-	// ========================================================
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -182,9 +321,9 @@ func (s *DomainService) callDomainAPI(
 		)
 	}
 
-	// ========================================================
+
 	// CHECK STATUS
-	// ========================================================
+
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 
@@ -195,9 +334,7 @@ func (s *DomainService) callDomainAPI(
 		)
 	}
 
-	// ========================================================
 	// PARSE JSON
-	// ========================================================
 
 	var result interface{}
 
@@ -209,102 +346,4 @@ func (s *DomainService) callDomainAPI(
 	}
 
 	return result, nil
-}
-
-func (s *DomainService) BulkSearch(query string) (interface{}, error) {
-
-	domain := cleanDomain(query)
-
-	if domain == "" {
-		return nil, errors.New("domain name cannot be empty")
-	}
-
-	// ----------------------------------------------------------
-	// User already provided TLD
-	//
-	// Example:
-	// eftakhar.com
-	// eftakhar.dev
-	//
-	// DON'T call external API
-	// ----------------------------------------------------------
-
-	if hasTLD(domain) {
-
-		return map[string]interface{}{
-			"domainName": domain,
-			"searched":   false,
-			"message":    "Top-level domain already provided",
-			"results": []DomainAPIRequest{
-				{
-					DomainName: domain,
-				},
-			},
-		}, nil
-	}
-
-	// ----------------------------------------------------------
-	// Generate domains
-	// ----------------------------------------------------------
-
-	payload := make([]DomainAPIRequest, 0, len(supportedTLDs))
-
-	for _, tld := range supportedTLDs {
-
-		payload = append(
-			payload,
-			DomainAPIRequest{
-				DomainName: domain + tld,
-			},
-		)
-	}
-
-	// ----------------------------------------------------------
-	// Call external bulk API
-	// ----------------------------------------------------------
-
-	return s.callDomainAPI(
-		"/domains/bulk-search",
-		payload,
-	)
-}
-
-// ============================================================
-// EXTERNAL API REQUEST
-// ============================================================
-
-// ============================================================
-// HELPERS
-// ============================================================
-func cleanDomain(query string) string {
-
-	q := strings.TrimSpace(
-		strings.ToLower(query),
-	)
-
-	q = strings.TrimPrefix(q, "http://")
-	q = strings.TrimPrefix(q, "https://")
-	q = strings.TrimPrefix(q, "www.")
-
-	q = strings.TrimSuffix(q, "/")
-
-	return q
-}
-func hasTLD(domain string) bool {
-
-	parts := strings.Split(domain, ".")
-
-	if len(parts) < 2 {
-		return false
-	}
-
-	// Invalid:
-	// .com
-	// eftakhar.
-	if parts[0] == "" ||
-		parts[len(parts)-1] == "" {
-		return false
-	}
-
-	return true
 }
