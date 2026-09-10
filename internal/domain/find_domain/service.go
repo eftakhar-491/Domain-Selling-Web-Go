@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 )
@@ -74,10 +75,8 @@ func (s *DomainService) Search(query string) (interface{}, error) {
 		domain = domain + ".com"
 	}
 
-	payload := []DomainAPIRequest{
-		{
-			DomainName: domain,
-		},
+	payload := DomainAPIRequest{
+		DomainName: domain,
 	}
 
 	return s.callDomainAPI(
@@ -99,8 +98,21 @@ func (s *DomainService) callDomainAPI(
 		)
 	}
 
+	baseURL := os.Getenv("DNA_BASE_URL")
+	if baseURL == "" {
+		baseURL = domainAPIBaseURL
+	}
+	rID := os.Getenv("DNA_RESELLER_ID")
+	if rID == "" {
+		rID = resellerID
+	}
+	key := os.Getenv("DNA_API_KEY")
+	if key == "" {
+		key = apiKey
+	}
+
 	// Full URL
-	url := domainAPIBaseURL + endpoint
+	url := baseURL + endpoint
 
 	// Create HTTP request
 	req, err := http.NewRequest(
@@ -131,12 +143,17 @@ func (s *DomainService) callDomainAPI(
 
 	req.Header.Set(
 		"__reseller",
-		resellerID,
+		rID,
 	)
 
 	req.Header.Set(
 		"X-API-KEY",
-		apiKey,
+		key,
+	)
+
+	req.Header.Set(
+		"User-Agent",
+		"Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
 	)
 
 	// ========================================================
