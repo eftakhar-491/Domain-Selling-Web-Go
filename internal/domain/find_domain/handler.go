@@ -19,9 +19,7 @@ func NewDomainHandler(service *DomainService) *DomainHandler {
 		service: service,
 	}
 }
-
 // Search
-//
 // GET /api/v1/find-domain/search?query=eftakhar
 // GET /api/v1/find-domain/search?domain=eftakhar.com
 func (h *DomainHandler) Search(c *echo.Context) error {
@@ -36,7 +34,7 @@ func (h *DomainHandler) Search(c *echo.Context) error {
 		return utils.ErrorResponse(
 			c,
 			http.StatusBadRequest,
-			"query or domain parameter is required",
+			"query=example or domain=example.com parameter is required",
 		)
 	}
 

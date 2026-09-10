@@ -30,11 +30,11 @@ func NewDomainService() *DomainService {
 // ============================================================
 
 const domainAPIBaseURL = "https://api.domainresellerapi.com/api/v1"
+const resellerID = "aa8ba854-e7c9-ae05-3ac3-3a2283c93d2e"
+const apiKey = "rz7UYB8Uo02uloexdaRY9kligZwMeRtJyqWI3LXM6E"
 
 // IMPORTANT:
 // Replace these with values from your ENV/config.
-const resellerID = "YOUR_RESELLER_ID"
-const apiKey = "YOUR_API_KEY"
 
 // ============================================================
 // SUPPORTED TLDs
@@ -85,70 +85,6 @@ func (s *DomainService) Search(query string) (interface{}, error) {
 		payload,
 	)
 }
-
-
-func (s *DomainService) BulkSearch(query string) (interface{}, error) {
-
-	domain := cleanDomain(query)
-
-	if domain == "" {
-		return nil, errors.New("domain name cannot be empty")
-	}
-
-	// ----------------------------------------------------------
-	// User already provided TLD
-	//
-	// Example:
-	// eftakhar.com
-	// eftakhar.dev
-	//
-	// DON'T call external API
-	// ----------------------------------------------------------
-
-	if hasTLD(domain) {
-
-		return map[string]interface{}{
-			"domainName": domain,
-			"searched":   false,
-			"message":    "Top-level domain already provided",
-			"results": []DomainAPIRequest{
-				{
-					DomainName: domain,
-				},
-			},
-		}, nil
-	}
-
-	// ----------------------------------------------------------
-	// Generate domains
-	// ----------------------------------------------------------
-
-	payload := make([]DomainAPIRequest, 0, len(supportedTLDs))
-
-	for _, tld := range supportedTLDs {
-
-		payload = append(
-			payload,
-			DomainAPIRequest{
-				DomainName: domain + tld,
-			},
-		)
-	}
-
-	// ----------------------------------------------------------
-	// Call external bulk API
-	// ----------------------------------------------------------
-
-	return s.callDomainAPI(
-		"/domains/bulk-search",
-		payload,
-	)
-}
-
-// ============================================================
-// EXTERNAL API REQUEST
-// ============================================================
-
 func (s *DomainService) callDomainAPI(
 	endpoint string,
 	payload interface{},
@@ -257,6 +193,68 @@ func (s *DomainService) callDomainAPI(
 
 	return result, nil
 }
+
+func (s *DomainService) BulkSearch(query string) (interface{}, error) {
+
+	domain := cleanDomain(query)
+
+	if domain == "" {
+		return nil, errors.New("domain name cannot be empty")
+	}
+
+	// ----------------------------------------------------------
+	// User already provided TLD
+	//
+	// Example:
+	// eftakhar.com
+	// eftakhar.dev
+	//
+	// DON'T call external API
+	// ----------------------------------------------------------
+
+	if hasTLD(domain) {
+
+		return map[string]interface{}{
+			"domainName": domain,
+			"searched":   false,
+			"message":    "Top-level domain already provided",
+			"results": []DomainAPIRequest{
+				{
+					DomainName: domain,
+				},
+			},
+		}, nil
+	}
+
+	// ----------------------------------------------------------
+	// Generate domains
+	// ----------------------------------------------------------
+
+	payload := make([]DomainAPIRequest, 0, len(supportedTLDs))
+
+	for _, tld := range supportedTLDs {
+
+		payload = append(
+			payload,
+			DomainAPIRequest{
+				DomainName: domain + tld,
+			},
+		)
+	}
+
+	// ----------------------------------------------------------
+	// Call external bulk API
+	// ----------------------------------------------------------
+
+	return s.callDomainAPI(
+		"/domains/bulk-search",
+		payload,
+	)
+}
+
+// ============================================================
+// EXTERNAL API REQUEST
+// ============================================================
 
 // ============================================================
 // HELPERS
