@@ -7,6 +7,7 @@ import (
 	"project-setup/internal/domain/cart"
 	"project-setup/internal/domain/discount"
 	"project-setup/internal/domain/find_domain"
+	"project-setup/internal/domain/order"
 	"project-setup/internal/domain/user"
 
 	"github.com/labstack/echo/v5"
@@ -30,4 +31,5 @@ func Routes(r *echo.Group, db *gorm.DB, redisClient *redis.Client) {
 	find_domain.DomainRoutes(r.Group("/find-domain"))
 	discount.DiscountRoutes(r.Group("/discounts"), db)
 	cart.CartRoutes(r.Group("/cart"), db)
+	order.OrderRoutes(r.Group("/orders"), db)
 }

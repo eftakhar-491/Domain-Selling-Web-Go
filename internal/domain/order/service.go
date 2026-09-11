@@ -1,0 +1,496 @@
+package order
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"strings"
+	"time"
+
+	"project-setup/internal/domain/discount"
+	"project-setup/internal/models"
+	stripepkg "project-setup/internal/pkg/stripe"
+
+	stripe "github.com/stripe/stripe-go/v78"
+	"gorm.io/gorm"
+)
+
+// OrderService contains all business logic for creating and managing orders
+type OrderService struct {
+	repo            *OrderRepository
+	cartDB          *gorm.DB // used for cart operations during checkout
+	discountService *discount.DiscountService
+	stripeService   *stripepkg.StripeService
+}
+
+// NewOrderService creates a new OrderService
+func NewOrderService(
+	repo *OrderRepository,
+	db *gorm.DB,
+	discountService *discount.DiscountService,
+	stripeService *stripepkg.StripeService,
+) *OrderService {
+	return &OrderService{
+		repo:            repo,
+		cartDB:          db,
+		discountService: discountService,
+		stripeService:   stripeService,
+	}
+}
+
+// ============================================================
+// CHECKOUT FROM CART
+// ============================================================
+
+// CheckoutFromCart converts the user's active cart into a paid order via Stripe
+func (s *OrderService) CheckoutFromCart(userID uint, req CreateOrderFromCartRequest) (*OrderResponse, error) {
+	// 1. Fetch the user's active cart
+	var cart models.Cart
+	err := s.cartDB.Where("user_id = ? AND status = ?", userID, models.CartStatusActive).
+		Preload("Items").
+		First(&cart).Error
+	if err != nil {
+		return nil, errors.New("no active cart found")
+	}
+
+	if len(cart.Items) == 0 {
+		return nil, errors.New("cart is empty")
+	}
+
+	// 2. Calculate pricing with discounts
+	currency := "USD"
+	if req.Currency != "" {
+		currency = req.Currency
+	}
+
+	var subtotal float64
+	var totalTLDDiscount float64
+	var orderItems []models.OrderItem
+
+	for _, item := range cart.Items {
+		originalPrice := math.Round(item.UnitPrice*float64(item.Period)*100) / 100
+		discountAmt, _ := s.discountService.CalculateItemDiscount(item.TLD, originalPrice)
+		finalPrice := math.Max(0, originalPrice-discountAmt)
+		finalPrice = math.Round(finalPrice*100) / 100
+
+		subtotal += originalPrice
+		totalTLDDiscount += discountAmt
+
+		orderItems = append(orderItems, models.OrderItem{
+			DomainName:     item.DomainName,
+			TLD:            item.TLD,
+			Period:         item.Period,
+			UnitPrice:      item.UnitPrice,
+			DiscountAmount: discountAmt,
+			FinalPrice:     finalPrice,
+			Currency:       currency,
+			Status:         models.OrderItemStatusPending,
+		})
+	}
+
+	subtotal = math.Round(subtotal*100) / 100
+	totalTLDDiscount = math.Round(totalTLDDiscount*100) / 100
+
+	// 3. Calculate coupon discount
+	var couponDiscount float64
+	cartBaseForCoupon := subtotal - totalTLDDiscount
+
+	if cart.CouponCode != nil && *cart.CouponCode != "" {
+		couponObj, err := s.discountService.ValidateCoupon(*cart.CouponCode, cartBaseForCoupon)
+		if err == nil {
+			couponDiscount = s.discountService.CalculateCouponDiscount(couponObj, cartBaseForCoupon)
+		}
+	}
+
+	couponDiscount = math.Round(couponDiscount*100) / 100
+	totalDiscount := math.Round((totalTLDDiscount+couponDiscount)*100) / 100
+	totalAmount := math.Max(0, subtotal-totalDiscount)
+	totalAmount = math.Round(totalAmount*100) / 100
+
+	if totalAmount <= 0 {
+		return nil, errors.New("order total must be greater than zero")
+	}
+
+	// 4. Generate order number
+	orderNumber := generateOrderNumber()
+
+	// 5. Create Stripe PaymentIntent
+	metadata := map[string]string{
+		"order_number": orderNumber,
+		"user_id":      fmt.Sprintf("%d", userID),
+	}
+
+	pi, err := s.stripeService.CreatePaymentIntent(totalAmount, strings.ToLower(currency), metadata)
+	if err != nil {
+		return nil, fmt.Errorf("payment processing failed: %w", err)
+	}
+
+	// 6. Persist Order
+	order := &models.Order{
+		OrderNumber:           orderNumber,
+		UserID:                userID,
+		Subtotal:              subtotal,
+		DiscountAmount:        totalTLDDiscount,
+		CouponCode:            cart.CouponCode,
+		CouponDiscount:        couponDiscount,
+		TotalAmount:           totalAmount,
+		Currency:              currency,
+		Status:                models.OrderStatusPendingPayment,
+		PaymentStatus:         models.PaymentStatusPending,
+		PaymentMethod:         "STRIPE",
+		StripePaymentIntentID: pi.ID,
+		StripeClientSecret:    pi.ClientSecret,
+		Items:                 orderItems,
+	}
+
+	if err := s.repo.CreateOrder(order); err != nil {
+		return nil, errors.New("failed to create order")
+	}
+
+	// 7. Mark cart as converted
+	s.cartDB.Model(&models.Cart{}).Where("id = ?", cart.ID).
+		Update("status", models.CartStatusConverted)
+
+	return s.buildOrderResponse(order, true), nil
+}
+
+// ============================================================
+// DIRECT ORDER (without cart)
+// ============================================================
+
+// CreateDirectOrder creates an order directly from a list of domains (no cart needed)
+func (s *OrderService) CreateDirectOrder(userID uint, req DirectOrderRequest) (*OrderResponse, error) {
+	if len(req.Items) == 0 {
+		return nil, errors.New("at least one domain item is required")
+	}
+
+	currency := "USD"
+	if req.Currency != "" {
+		currency = req.Currency
+	}
+
+	var subtotal float64
+	var totalDiscount float64
+	var orderItems []models.OrderItem
+
+	for _, item := range req.Items {
+		domainName := strings.ToLower(strings.TrimSpace(item.DomainName))
+		tld := extractTLD(domainName)
+		if tld == "" {
+			return nil, fmt.Errorf("invalid domain name: %s", item.DomainName)
+		}
+
+		originalPrice := math.Round(item.UnitPrice*float64(item.Period)*100) / 100
+		discountAmt, _ := s.discountService.CalculateItemDiscount(tld, originalPrice)
+		finalPrice := math.Max(0, originalPrice-discountAmt)
+		finalPrice = math.Round(finalPrice*100) / 100
+
+		subtotal += originalPrice
+		totalDiscount += discountAmt
+
+		orderItems = append(orderItems, models.OrderItem{
+			DomainName:     domainName,
+			TLD:            tld,
+			Period:         item.Period,
+			UnitPrice:      item.UnitPrice,
+			DiscountAmount: discountAmt,
+			FinalPrice:     finalPrice,
+			Currency:       currency,
+			Status:         models.OrderItemStatusPending,
+		})
+	}
+
+	subtotal = math.Round(subtotal*100) / 100
+	totalDiscount = math.Round(totalDiscount*100) / 100
+	totalAmount := math.Max(0, subtotal-totalDiscount)
+	totalAmount = math.Round(totalAmount*100) / 100
+
+	if totalAmount <= 0 {
+		return nil, errors.New("order total must be greater than zero")
+	}
+
+	orderNumber := generateOrderNumber()
+
+	metadata := map[string]string{
+		"order_number": orderNumber,
+		"user_id":      fmt.Sprintf("%d", userID),
+	}
+
+	pi, err := s.stripeService.CreatePaymentIntent(totalAmount, strings.ToLower(currency), metadata)
+	if err != nil {
+		return nil, fmt.Errorf("payment processing failed: %w", err)
+	}
+
+	order := &models.Order{
+		OrderNumber:           orderNumber,
+		UserID:                userID,
+		Subtotal:              subtotal,
+		DiscountAmount:        totalDiscount,
+		TotalAmount:           totalAmount,
+		Currency:              currency,
+		Status:                models.OrderStatusPendingPayment,
+		PaymentStatus:         models.PaymentStatusPending,
+		PaymentMethod:         "STRIPE",
+		StripePaymentIntentID: pi.ID,
+		StripeClientSecret:    pi.ClientSecret,
+		Items:                 orderItems,
+	}
+
+	if err := s.repo.CreateOrder(order); err != nil {
+		return nil, errors.New("failed to create order")
+	}
+
+	return s.buildOrderResponse(order, true), nil
+}
+
+// ============================================================
+// PAYMENT CONFIRMATION
+// ============================================================
+
+// ConfirmPayment verifies the Stripe payment from the client side and updates the order
+func (s *OrderService) ConfirmPayment(userID uint, orderID uint, paymentIntentID string) (*OrderResponse, error) {
+	order, err := s.repo.GetOrderByIDAndUser(orderID, userID)
+	if err != nil {
+		return nil, errors.New("order not found")
+	}
+
+	if order.Status != models.OrderStatusPendingPayment {
+		return nil, errors.New("order is not awaiting payment")
+	}
+
+	if order.StripePaymentIntentID != paymentIntentID {
+		return nil, errors.New("payment intent does not match this order")
+	}
+
+	// Verify payment status with Stripe
+	pi, err := s.stripeService.GetPaymentIntent(paymentIntentID)
+	if err != nil {
+		return nil, errors.New("failed to verify payment with Stripe")
+	}
+
+	if pi.Status == stripe.PaymentIntentStatusSucceeded {
+		order.Status = models.OrderStatusPaid
+		order.PaymentStatus = models.PaymentStatusPaid
+		s.repo.UpdateOrder(order)
+		s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusActive)
+	} else if pi.Status == stripe.PaymentIntentStatusCanceled {
+		order.Status = models.OrderStatusFailed
+		order.PaymentStatus = models.PaymentStatusFailed
+		s.repo.UpdateOrder(order)
+		s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusFailed)
+	}
+
+	// Re-fetch for fresh state
+	order, _ = s.repo.GetOrderByID(order.ID)
+	return s.buildOrderResponse(order, false), nil
+}
+
+// ============================================================
+// STRIPE WEBHOOK
+// ============================================================
+
+// HandleStripeWebhook processes incoming Stripe webhook events
+func (s *OrderService) HandleStripeWebhook(payload []byte, sigHeader string) error {
+	event, err := s.stripeService.ConstructWebhookEvent(payload, sigHeader)
+	if err != nil {
+		return fmt.Errorf("webhook signature verification failed: %w", err)
+	}
+
+	switch event.Type {
+	case "payment_intent.succeeded":
+		var pi stripe.PaymentIntent
+		if err := json.Unmarshal(event.Data.Raw, &pi); err != nil {
+			return fmt.Errorf("failed to parse payment intent: %w", err)
+		}
+		return s.handlePaymentSuccess(pi.ID)
+
+	case "payment_intent.payment_failed":
+		var pi stripe.PaymentIntent
+		if err := json.Unmarshal(event.Data.Raw, &pi); err != nil {
+			return fmt.Errorf("failed to parse payment intent: %w", err)
+		}
+		return s.handlePaymentFailure(pi.ID)
+	}
+
+	return nil
+}
+
+func (s *OrderService) handlePaymentSuccess(paymentIntentID string) error {
+	order, err := s.repo.GetOrderByPaymentIntentID(paymentIntentID)
+	if err != nil {
+		return fmt.Errorf("order not found for payment intent: %s", paymentIntentID)
+	}
+
+	if order.PaymentStatus == models.PaymentStatusPaid {
+		return nil // Already processed (idempotent)
+	}
+
+	order.Status = models.OrderStatusPaid
+	order.PaymentStatus = models.PaymentStatusPaid
+	if err := s.repo.UpdateOrder(order); err != nil {
+		return errors.New("failed to update order status")
+	}
+
+	s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusActive)
+	return nil
+}
+
+func (s *OrderService) handlePaymentFailure(paymentIntentID string) error {
+	order, err := s.repo.GetOrderByPaymentIntentID(paymentIntentID)
+	if err != nil {
+		return fmt.Errorf("order not found for payment intent: %s", paymentIntentID)
+	}
+
+	order.Status = models.OrderStatusFailed
+	order.PaymentStatus = models.PaymentStatusFailed
+	if err := s.repo.UpdateOrder(order); err != nil {
+		return errors.New("failed to update order status")
+	}
+
+	s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusFailed)
+	return nil
+}
+
+// ============================================================
+// QUERY METHODS
+// ============================================================
+
+// GetOrderByID fetches a single order — regular users can only see their own orders
+func (s *OrderService) GetOrderByID(userID uint, orderID uint, role string) (*OrderResponse, error) {
+	var order *models.Order
+	var err error
+
+	if role == string(models.RoleAdmin) || role == string(models.RoleSuperAdmin) {
+		order, err = s.repo.GetOrderByID(orderID)
+	} else {
+		order, err = s.repo.GetOrderByIDAndUser(orderID, userID)
+	}
+
+	if err != nil {
+		return nil, errors.New("order not found")
+	}
+
+	return s.buildOrderResponse(order, false), nil
+}
+
+// GetUserOrders returns a paginated list of orders for the authenticated user
+func (s *OrderService) GetUserOrders(userID uint, page, limit int) (*OrderListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 50 {
+		limit = 10
+	}
+
+	orders, total, err := s.repo.GetUserOrders(userID, page, limit)
+	if err != nil {
+		return nil, errors.New("failed to fetch orders")
+	}
+
+	return s.buildOrderListResponse(orders, total, page, limit), nil
+}
+
+// AdminGetAllOrders returns a paginated list of all orders (admin/super-admin only)
+func (s *OrderService) AdminGetAllOrders(page, limit int, status string) (*OrderListResponse, error) {
+	if page < 1 {
+		page = 1
+	}
+	if limit < 1 || limit > 100 {
+		limit = 10
+	}
+
+	orders, total, err := s.repo.GetAllOrders(page, limit, status)
+	if err != nil {
+		return nil, errors.New("failed to fetch orders")
+	}
+
+	return s.buildOrderListResponse(orders, total, page, limit), nil
+}
+
+// ============================================================
+// RESPONSE BUILDERS
+// ============================================================
+
+func (s *OrderService) buildOrderResponse(order *models.Order, includeClientSecret bool) *OrderResponse {
+	var items []OrderItemResponse
+	for _, item := range order.Items {
+		items = append(items, OrderItemResponse{
+			ID:             item.ID,
+			DomainName:     item.DomainName,
+			TLD:            item.TLD,
+			Period:         item.Period,
+			UnitPrice:      item.UnitPrice,
+			DiscountAmount: item.DiscountAmount,
+			FinalPrice:     item.FinalPrice,
+			Currency:       item.Currency,
+			Status:         string(item.Status),
+		})
+	}
+
+	resp := &OrderResponse{
+		ID:                    order.ID,
+		OrderNumber:           order.OrderNumber,
+		Items:                 items,
+		ItemsCount:            len(items),
+		Subtotal:              order.Subtotal,
+		DiscountAmount:        order.DiscountAmount,
+		CouponCode:            order.CouponCode,
+		CouponDiscount:        order.CouponDiscount,
+		TotalAmount:           order.TotalAmount,
+		Currency:              order.Currency,
+		Status:                string(order.Status),
+		PaymentStatus:         string(order.PaymentStatus),
+		PaymentMethod:         order.PaymentMethod,
+		StripePaymentIntentID: order.StripePaymentIntentID,
+		CreatedAt:             order.CreatedAt.Format(time.RFC3339),
+	}
+
+	if includeClientSecret {
+		resp.StripeClientSecret = order.StripeClientSecret
+	}
+
+	return resp
+}
+
+func (s *OrderService) buildOrderListResponse(orders []models.Order, total int64, page, limit int) *OrderListResponse {
+	var orderResponses []OrderResponse
+	for _, o := range orders {
+		orderResponses = append(orderResponses, *s.buildOrderResponse(&o, false))
+	}
+
+	totalPages := int(math.Ceil(float64(total) / float64(limit)))
+
+	return &OrderListResponse{
+		Orders:     orderResponses,
+		TotalCount: total,
+		Page:       page,
+		Limit:      limit,
+		TotalPages: totalPages,
+	}
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+// generateOrderNumber creates a unique order number: ORD-YYYYMMDD-XXXXXXXX
+func generateOrderNumber() string {
+	b := make([]byte, 4)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("ORD-%s-%s",
+		time.Now().Format("20060102"),
+		strings.ToUpper(hex.EncodeToString(b)),
+	)
+}
+
+// extractTLD extracts the TLD from a domain name (e.g. "example.com" -> "com")
+func extractTLD(domain string) string {
+	parts := strings.Split(domain, ".")
+	if len(parts) < 2 {
+		return ""
+	}
+	return strings.Join(parts[1:], ".")
+}
