@@ -16,12 +16,15 @@ func main() {
 	fmt.Println("Database Connecting...")
 	db := config.ConnectDB()
 
-	// Auto-migrate user models
-	// if err := db.AutoMigrate(
-	// 	&models.User{},
-	// ); err != nil {
-	// 	log.Printf("⚠️ Auto-migrate warning: %v\n", err)
-	// }
+	// Auto-migrate models
+	if err := db.AutoMigrate(
+		&models.User{},
+		&models.Discount{},
+		&models.Cart{},
+		&models.CartItem{},
+	); err != nil {
+		log.Printf("⚠️ Auto-migrate warning: %v\n", err)
+	}
 	fmt.Println("Database Connected & Migrated")
 
 	// Initialize Redis Connection
