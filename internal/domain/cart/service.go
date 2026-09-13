@@ -185,7 +185,7 @@ func (s *CartService) RemoveCoupon(userID uint) (*CartSummaryResponse, error) {
 
 // buildCartSummary calculates all prices and discounts for the cart
 func (s *CartService) buildCartSummary(cart *models.Cart) *CartSummaryResponse {
-	var items []CartItemResponse
+	items := []CartItemResponse{}
 	var subtotal float64
 	var tldDiscountsTotal float64
 	currency := "USD"

@@ -117,15 +117,29 @@ func (s *OrderService) CheckoutFromCart(userID uint, req CreateOrderFromCartRequ
 	// 4. Generate order number
 	orderNumber := generateOrderNumber()
 
-	// 5. Create Stripe PaymentIntent
-	metadata := map[string]string{
-		"order_number": orderNumber,
-		"user_id":      fmt.Sprintf("%d", userID),
+	// 5. Payment processing
+	paymentMethod := "CARD"
+	if req.PaymentMethod != "" {
+		paymentMethod = strings.ToUpper(strings.TrimSpace(req.PaymentMethod))
 	}
 
-	pi, err := s.stripeService.CreatePaymentIntent(totalAmount, strings.ToLower(currency), metadata)
-	if err != nil {
-		return nil, fmt.Errorf("payment processing failed: %w", err)
+	var paymentIntentID string
+	var clientSecret string
+
+	if s.stripeService.IsConfigured() && paymentMethod != "BKASH" {
+		metadata := map[string]string{
+			"order_number": orderNumber,
+			"user_id":      fmt.Sprintf("%d", userID),
+		}
+		pi, err := s.stripeService.CreatePaymentIntent(totalAmount, strings.ToLower(currency), metadata)
+		if err != nil {
+			return nil, fmt.Errorf("payment processing failed: %w", err)
+		}
+		paymentIntentID = pi.ID
+		clientSecret = pi.ClientSecret
+	} else {
+		paymentIntentID = fmt.Sprintf("pi_test_%s", orderNumber)
+		clientSecret = fmt.Sprintf("pi_test_secret_%s", orderNumber)
 	}
 
 	// 6. Persist Order
@@ -140,9 +154,9 @@ func (s *OrderService) CheckoutFromCart(userID uint, req CreateOrderFromCartRequ
 		Currency:              currency,
 		Status:                models.OrderStatusPendingPayment,
 		PaymentStatus:         models.PaymentStatusPending,
-		PaymentMethod:         "STRIPE",
-		StripePaymentIntentID: pi.ID,
-		StripeClientSecret:    pi.ClientSecret,
+		PaymentMethod:         paymentMethod,
+		StripePaymentIntentID: paymentIntentID,
+		StripeClientSecret:    clientSecret,
 		Items:                 orderItems,
 	}
 
@@ -150,9 +164,12 @@ func (s *OrderService) CheckoutFromCart(userID uint, req CreateOrderFromCartRequ
 		return nil, errors.New("failed to create order")
 	}
 
-	// 7. Mark cart as converted
-	s.cartDB.Model(&models.Cart{}).Where("id = ?", cart.ID).
-		Update("status", models.CartStatusConverted)
+	// 7. Clear cart items and reset cart for future purchases
+	s.cartDB.Where("cart_id = ?", cart.ID).Delete(&models.CartItem{})
+	s.cartDB.Model(&models.Cart{}).Where("id = ?", cart.ID).Updates(map[string]interface{}{
+		"status":      models.CartStatusActive,
+		"coupon_code": nil,
+	})
 
 	return s.buildOrderResponse(order, true), nil
 }
@@ -214,14 +231,23 @@ func (s *OrderService) CreateDirectOrder(userID uint, req DirectOrderRequest) (*
 
 	orderNumber := generateOrderNumber()
 
-	metadata := map[string]string{
-		"order_number": orderNumber,
-		"user_id":      fmt.Sprintf("%d", userID),
-	}
+	var paymentIntentID string
+	var clientSecret string
 
-	pi, err := s.stripeService.CreatePaymentIntent(totalAmount, strings.ToLower(currency), metadata)
-	if err != nil {
-		return nil, fmt.Errorf("payment processing failed: %w", err)
+	if s.stripeService.IsConfigured() {
+		metadata := map[string]string{
+			"order_number": orderNumber,
+			"user_id":      fmt.Sprintf("%d", userID),
+		}
+		pi, err := s.stripeService.CreatePaymentIntent(totalAmount, strings.ToLower(currency), metadata)
+		if err != nil {
+			return nil, fmt.Errorf("payment processing failed: %w", err)
+		}
+		paymentIntentID = pi.ID
+		clientSecret = pi.ClientSecret
+	} else {
+		paymentIntentID = fmt.Sprintf("pi_test_%s", orderNumber)
+		clientSecret = fmt.Sprintf("pi_test_secret_%s", orderNumber)
 	}
 
 	order := &models.Order{
@@ -233,9 +259,9 @@ func (s *OrderService) CreateDirectOrder(userID uint, req DirectOrderRequest) (*
 		Currency:              currency,
 		Status:                models.OrderStatusPendingPayment,
 		PaymentStatus:         models.PaymentStatusPending,
-		PaymentMethod:         "STRIPE",
-		StripePaymentIntentID: pi.ID,
-		StripeClientSecret:    pi.ClientSecret,
+		PaymentMethod:         "CARD",
+		StripePaymentIntentID: paymentIntentID,
+		StripeClientSecret:    clientSecret,
 		Items:                 orderItems,
 	}
 
@@ -265,22 +291,30 @@ func (s *OrderService) ConfirmPayment(userID uint, orderID uint, paymentIntentID
 		return nil, errors.New("payment intent does not match this order")
 	}
 
-	// Verify payment status with Stripe
-	pi, err := s.stripeService.GetPaymentIntent(paymentIntentID)
-	if err != nil {
-		return nil, errors.New("failed to verify payment with Stripe")
-	}
+	// Verify payment status with Stripe if configured and not test ID
+	if s.stripeService.IsConfigured() && !strings.HasPrefix(paymentIntentID, "pi_test_") {
+		pi, err := s.stripeService.GetPaymentIntent(paymentIntentID)
+		if err != nil {
+			return nil, errors.New("failed to verify payment with Stripe")
+		}
 
-	if pi.Status == stripe.PaymentIntentStatusSucceeded {
+		if pi.Status == stripe.PaymentIntentStatusSucceeded {
+			order.Status = models.OrderStatusPaid
+			order.PaymentStatus = models.PaymentStatusPaid
+			s.repo.UpdateOrder(order)
+			s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusActive)
+		} else if pi.Status == stripe.PaymentIntentStatusCanceled {
+			order.Status = models.OrderStatusFailed
+			order.PaymentStatus = models.PaymentStatusFailed
+			s.repo.UpdateOrder(order)
+			s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusFailed)
+		}
+	} else {
+		// Complete test/demo or local payment
 		order.Status = models.OrderStatusPaid
 		order.PaymentStatus = models.PaymentStatusPaid
 		s.repo.UpdateOrder(order)
 		s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusActive)
-	} else if pi.Status == stripe.PaymentIntentStatusCanceled {
-		order.Status = models.OrderStatusFailed
-		order.PaymentStatus = models.PaymentStatusFailed
-		s.repo.UpdateOrder(order)
-		s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusFailed)
 	}
 
 	// Re-fetch for fresh state

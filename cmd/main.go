@@ -12,7 +12,7 @@ import (
 )
 
 func main() {
-	// Initialize Database Connection
+	// Initialize Database Connection (active)
 	fmt.Println("Database Connecting...")
 	db := config.ConnectDB()
 
@@ -35,6 +35,9 @@ func main() {
 
 	// Seed default SuperAdmin account
 	seedSuperAdmin()
+
+	// Seed starter discount coupons
+	seedDefaultCoupons()
 
 	// Start HTTP server
 	fmt.Println("Server Starting...")
@@ -86,4 +89,59 @@ func seedSuperAdmin() {
 	}
 
 	log.Println("🎉 SuperAdmin account created successfully:", email)
+}
+
+// seedDefaultCoupons inserts starter coupons if they do not exist
+func seedDefaultCoupons() {
+	db := config.DB
+	if db == nil {
+		return
+	}
+
+	coupons := []struct {
+		code        string
+		name        string
+		description string
+		typ         models.DiscountType
+		value       float64
+		minSpend    float64
+	}{
+		{
+			code:        "WELCOME10",
+			name:        "Welcome 10% Off",
+			description: "Enjoy 10% discount on your domain order",
+			typ:         models.DiscountTypePercentage,
+			value:       10.00,
+			minSpend:    0.00,
+		},
+		{
+			code:        "SAVE5",
+			name:        "$5 Off Domain Order",
+			description: "$5 fixed discount on domain orders of $10 or more",
+			typ:         models.DiscountTypeFixed,
+			value:       5.00,
+			minSpend:    10.00,
+		},
+	}
+
+	for _, c := range coupons {
+		var existing models.Discount
+		codeStr := c.code
+		if err := db.Where("code = ?", codeStr).First(&existing).Error; err != nil {
+			discount := models.Discount{
+				Code:        &codeStr,
+				Name:        c.name,
+				Description: c.description,
+				Type:        c.typ,
+				Scope:       models.DiscountScopeCoupon,
+				Value:       c.value,
+				MinSpend:    c.minSpend,
+				UsageLimit:  5000,
+				IsActive:    true,
+			}
+			if err := db.Create(&discount).Error; err == nil {
+				log.Println("🏷️ Seeded default coupon code:", c.code)
+			}
+		}
+	}
 }

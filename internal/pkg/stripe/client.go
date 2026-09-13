@@ -27,6 +27,11 @@ func NewStripeService() *StripeService {
 	}
 }
 
+// IsConfigured returns true if Stripe secret key is set
+func (s *StripeService) IsConfigured() bool {
+	return s.secretKey != ""
+}
+
 // CreatePaymentIntent creates a Stripe PaymentIntent for the given amount
 // amount is in the major currency unit (e.g. 9.99 USD), it will be converted to cents
 func (s *StripeService) CreatePaymentIntent(amount float64, currency string, metadata map[string]string) (*stripe.PaymentIntent, error) {

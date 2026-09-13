@@ -5,7 +5,8 @@ package order
 // CreateOrderFromCartRequest is the payload for checking out from the user's active cart
 type CreateOrderFromCartRequest struct {
 	// Currency override (optional, defaults to cart items' currency)
-	Currency string `json:"currency"`
+	Currency      string `json:"currency"`
+	PaymentMethod string `json:"payment_method"`
 }
 
 // DirectOrderRequest allows placing an order for domains without using a cart

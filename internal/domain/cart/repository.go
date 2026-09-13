@@ -14,10 +14,11 @@ func NewCartRepository(db *gorm.DB) *CartRepository {
 	return &CartRepository{db: db}
 }
 
-// GetOrCreateActiveCart finds the user's active cart or creates one
+// GetOrCreateActiveCart finds the user's active cart or creates/reactivates one
 func (r *CartRepository) GetOrCreateActiveCart(userID uint) (*models.Cart, error) {
 	var cart models.Cart
-	err := r.db.Where("user_id = ? AND status = ?", userID, models.CartStatusActive).
+	// Find if user already has a cart
+	err := r.db.Where("user_id = ?", userID).
 		Preload("Items").
 		First(&cart).Error
 
@@ -30,21 +31,28 @@ func (r *CartRepository) GetOrCreateActiveCart(userID uint) (*models.Cart, error
 			return nil, err
 		}
 		return &cart, nil
+	} else if err != nil {
+		return nil, err
 	}
 
-	return &cart, err
+	// If the existing cart was marked converted from previous order, reactivate it and clear old items
+	if cart.Status != models.CartStatusActive {
+		_ = r.db.Where("cart_id = ?", cart.ID).Delete(&models.CartItem{}).Error
+		cart.Status = models.CartStatusActive
+		cart.CouponCode = nil
+		cart.Items = []models.CartItem{}
+		_ = r.db.Model(&cart).Updates(map[string]interface{}{
+			"status":      models.CartStatusActive,
+			"coupon_code": nil,
+		}).Error
+	}
+
+	return &cart, nil
 }
 
 // GetCartWithItems fetches the user's active cart with all items
 func (r *CartRepository) GetCartWithItems(userID uint) (*models.Cart, error) {
-	var cart models.Cart
-	err := r.db.Where("user_id = ? AND status = ?", userID, models.CartStatusActive).
-		Preload("Items").
-		First(&cart).Error
-	if err != nil {
-		return nil, err
-	}
-	return &cart, nil
+	return r.GetOrCreateActiveCart(userID)
 }
 
 // FindItemByDomain checks if a domain is already in the cart
