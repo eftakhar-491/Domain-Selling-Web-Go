@@ -47,6 +47,8 @@ var supportedTLDs = []string{
 	".info",
 	".xyz",
 	".dev",
+	".ai",
+	".io",
 }
 
 // ============================================================
@@ -321,9 +323,7 @@ func (s *DomainService) BulkSearch(query string) (interface{}, error) {
 		)
 	}
 
-
 	// CHECK STATUS
-
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 
