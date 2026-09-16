@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"strings"
 	"time"
@@ -24,6 +25,7 @@ type OrderService struct {
 	cartDB          *gorm.DB // used for cart operations during checkout
 	discountService *discount.DiscountService
 	stripeService   *stripepkg.StripeService
+	resellerService *ResellerService
 }
 
 // NewOrderService creates a new OrderService
@@ -38,6 +40,7 @@ func NewOrderService(
 		cartDB:          db,
 		discountService: discountService,
 		stripeService:   stripeService,
+		resellerService: NewResellerService(db),
 	}
 }
 
@@ -303,6 +306,10 @@ func (s *OrderService) ConfirmPayment(userID uint, orderID uint, paymentIntentID
 			order.PaymentStatus = models.PaymentStatusPaid
 			s.repo.UpdateOrder(order)
 			s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusActive)
+
+			// Register domains with DNA Reseller API
+			log.Printf("[Order] ConfirmPayment success for order #%s — triggering domain registration", order.OrderNumber)
+			s.resellerService.RegisterOrderDomains(order)
 		} else if pi.Status == stripe.PaymentIntentStatusCanceled {
 			order.Status = models.OrderStatusFailed
 			order.PaymentStatus = models.PaymentStatusFailed
@@ -315,6 +322,10 @@ func (s *OrderService) ConfirmPayment(userID uint, orderID uint, paymentIntentID
 		order.PaymentStatus = models.PaymentStatusPaid
 		s.repo.UpdateOrder(order)
 		s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusActive)
+
+		// Register domains with DNA Reseller API (test/local payment)
+		log.Printf("[Order] ConfirmPayment (test) success for order #%s — triggering domain registration", order.OrderNumber)
+		s.resellerService.RegisterOrderDomains(order)
 	}
 
 	// Re-fetch for fresh state
@@ -369,6 +380,11 @@ func (s *OrderService) handlePaymentSuccess(paymentIntentID string) error {
 	}
 
 	s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusActive)
+
+	// 🔥 Register domains with DNA Reseller API after successful payment
+	log.Printf("[Order] Payment success for order #%s — triggering domain registration", order.OrderNumber)
+	s.resellerService.RegisterOrderDomains(order)
+
 	return nil
 }
 

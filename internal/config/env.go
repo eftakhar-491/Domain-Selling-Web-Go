@@ -31,6 +31,9 @@ type EnvConfig struct {
 	DNAProdRestBaseURL  string
 	DNAProdSOAPEndpoint string
 	DNATestSOAPEndpoint string
+	DNABaseURL          string
+	DNAResellerID       string
+	DNAAPIKey           string
 	StripeSecretKey     string
 	StripePublishableKey string
 	StripeWebhookSecret string
@@ -75,6 +78,9 @@ func LoadEnv() *EnvConfig {
 			DNAProdRestBaseURL:  os.Getenv("DNA_PROD_REST_BASE_URL"),
 			DNAProdSOAPEndpoint: os.Getenv("DNA_PROD_SOAP_ENDPOINT"),
 			DNATestSOAPEndpoint: os.Getenv("DNA_TEST_SOAP_ENDPOINT"),
+			DNABaseURL:          os.Getenv("DNA_BASE_URL"),
+			DNAResellerID:       os.Getenv("DNA_RESELLER_ID"),
+			DNAAPIKey:           os.Getenv("DNA_API_KEY"),
 			StripeSecretKey:     os.Getenv("STRIPE_SECRET_KEY"),
 			StripePublishableKey: os.Getenv("STRIPE_PUBLISHABLE_KEY"),
 			StripeWebhookSecret: os.Getenv("STRIPE_WEBHOOK_SECRET"),

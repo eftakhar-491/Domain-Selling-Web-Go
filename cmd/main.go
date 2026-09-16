@@ -24,6 +24,8 @@ func main() {
 		&models.CartItem{},
 		&models.Order{},
 		&models.OrderItem{},
+		&models.Domain{},
+		&models.DNSRecord{},
 	); err != nil {
 		log.Printf("⚠️ Auto-migrate warning: %v\n", err)
 	}
