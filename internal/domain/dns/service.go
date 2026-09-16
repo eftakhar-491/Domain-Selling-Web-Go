@@ -412,3 +412,125 @@ func (s *DNSService) toRecordResponse(r *models.DNSRecord) DNSRecordResponse {
 		UpdatedAt:  r.UpdatedAt.Format(time.RFC3339),
 	}
 }
+
+// ============================================================
+// NAMESERVERS MANAGEMENT
+// ============================================================
+
+// UpdateNameServers updates nameservers for a domain in DB and syncs to DNA API via PUT
+func (s *DNSService) UpdateNameServers(userID uint, req UpdateNameServerRequest) (*NameServerResponse, error) {
+	domainName := strings.ToLower(strings.TrimSpace(req.DomainName))
+	if domainName == "" {
+		return nil, errors.New("domainName is required")
+	}
+
+	// Clean nameservers list
+	var cleaned []string
+	for _, ns := range req.NameServers {
+		trimmed := strings.TrimSpace(ns)
+		if trimmed != "" {
+			cleaned = append(cleaned, trimmed)
+		}
+	}
+	if len(cleaned) == 0 {
+		return nil, errors.New("at least one valid nameServer is required")
+	}
+
+	// Verify user ownership
+	domain, err := s.repo.GetDomainByNameAndUser(domainName, userID)
+	if err != nil {
+		return nil, fmt.Errorf("domain '%s' not found or you don't have access", domainName)
+	}
+
+	// 1. Save to DB — update domain's nameservers string
+	nsJoined := strings.Join(cleaned, ",")
+	if err := s.repo.UpdateDomainNameservers(domain.ID, nsJoined); err != nil {
+		log.Printf("[DNS] ❌ Failed to update nameservers in DB for %s: %v", domainName, err)
+		return nil, fmt.Errorf("failed to save nameservers: %w", err)
+	}
+
+	// 2. Save NS records in dns_records table
+	_ = s.repo.DeleteNSRecordsByDomain(domain.ID)
+	for _, ns := range cleaned {
+		rec := models.DNSRecord{
+			UserID:     userID,
+			DomainID:   domain.ID,
+			DomainName: domainName,
+			HostName:   "@",
+			RecordType: models.DNSRecordTypeNS,
+			IPAddress:  ns,
+			IPVersion:  "IPv4",
+			TTL:        3600,
+			SyncStatus: models.DNSSyncStatusPending,
+		}
+		_ = s.repo.CreateRecord(&rec)
+	}
+
+	// 3. Sync to external DNA reseller API via PUT (async)
+	go s.syncNameServersToDNA(domain.ID, domainName, cleaned)
+
+	return &NameServerResponse{
+		DomainID:    domain.ID,
+		DomainName:  domainName,
+		NameServers: cleaned,
+		SyncStatus:  string(models.DNSSyncStatusPending),
+		UpdatedAt:   time.Now().Format(time.RFC3339),
+	}, nil
+}
+
+// GetNameServers retrieves the current nameservers for a domain
+func (s *DNSService) GetNameServers(userID uint, domainName string) (*NameServerResponse, error) {
+	domainName = strings.ToLower(strings.TrimSpace(domainName))
+	if domainName == "" {
+		return nil, errors.New("domain query parameter is required")
+	}
+
+	domain, err := s.repo.GetDomainByNameAndUser(domainName, userID)
+	if err != nil {
+		return nil, fmt.Errorf("domain '%s' not found or you don't have access", domainName)
+	}
+
+	var nameservers []string
+	if domain.Nameservers != "" {
+		for _, ns := range strings.Split(domain.Nameservers, ",") {
+			if trimmed := strings.TrimSpace(ns); trimmed != "" {
+				nameservers = append(nameservers, trimmed)
+			}
+		}
+	}
+
+	// Check if any NS records have status
+	syncStatus := string(models.DNSSyncStatusSynced)
+	var syncError string
+	records, _ := s.repo.GetRecordsByDomainName(userID, domainName)
+	for _, r := range records {
+		if r.RecordType == models.DNSRecordTypeNS {
+			syncStatus = string(r.SyncStatus)
+			syncError = r.SyncError
+			break
+		}
+	}
+
+	return &NameServerResponse{
+		DomainID:    domain.ID,
+		DomainName:  domain.DomainName,
+		NameServers: nameservers,
+		SyncStatus:  syncStatus,
+		SyncError:   syncError,
+		UpdatedAt:   domain.UpdatedAt.Format(time.RFC3339),
+	}, nil
+}
+
+// syncNameServersToDNA syncs nameservers to DNA reseller API via PUT
+func (s *DNSService) syncNameServersToDNA(domainID uint, domainName string, nameServers []string) {
+	_, err := s.reseller.UpdateNameServer(domainName, nameServers)
+	if err != nil {
+		log.Printf("[DNS] ⚠️ DNA PUT nameserver sync failed for %s: %v", domainName, err)
+		_ = s.repo.UpdateNSRecordsSyncStatus(domainID, models.DNSSyncStatusFailed, err.Error())
+		return
+	}
+
+	_ = s.repo.UpdateNSRecordsSyncStatus(domainID, models.DNSSyncStatusSynced, "")
+	log.Printf("[DNS] ✅ Nameservers synced to DNA API successfully for %s: %v", domainName, nameServers)
+}
+

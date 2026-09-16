@@ -204,3 +204,57 @@ func (h *DNSHandler) ResyncRecord(c *echo.Context) error {
 
 	return utils.SuccessResponse(c, http.StatusOK, "DNS record re-syncing to reseller API", record)
 }
+
+// ============================================================
+// NAMESERVER MANAGEMENT
+// ============================================================
+
+// UpdateNameServers updates nameservers for a domain and syncs to DNA API via PUT
+// PUT /api/v1/dns/name-server
+func (h *DNSHandler) UpdateNameServers(c *echo.Context) error {
+	userID, ok := c.Get("user_id").(uint)
+	if !ok {
+		return utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user session")
+	}
+
+	var req UpdateNameServerRequest
+	if err := c.Bind(&req); err != nil {
+		return utils.ErrorResponse(c, http.StatusBadRequest, "Invalid request body")
+	}
+
+	if err := c.Validate(&req); err != nil {
+		return utils.ErrorResponse(c, http.StatusBadRequest, "Validation failed: "+err.Error())
+	}
+
+	result, err := h.service.UpdateNameServers(userID, req)
+	if err != nil {
+		return utils.ErrorResponse(c, http.StatusBadRequest, err.Error())
+	}
+
+	return utils.SuccessResponse(c, http.StatusOK, "Nameservers updated and syncing to reseller API", result)
+}
+
+// GetNameServers retrieves nameservers for a domain
+// GET /api/v1/dns/name-server?domain=example.com
+func (h *DNSHandler) GetNameServers(c *echo.Context) error {
+	userID, ok := c.Get("user_id").(uint)
+	if !ok {
+		return utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user session")
+	}
+
+	domainName := c.QueryParam("domain")
+	if domainName == "" {
+		domainName = c.QueryParam("domainName")
+	}
+	if domainName == "" {
+		return utils.ErrorResponse(c, http.StatusBadRequest, "domain query parameter is required")
+	}
+
+	result, err := h.service.GetNameServers(userID, domainName)
+	if err != nil {
+		return utils.ErrorResponse(c, http.StatusBadRequest, err.Error())
+	}
+
+	return utils.SuccessResponse(c, http.StatusOK, "Nameservers retrieved successfully", result)
+}
+

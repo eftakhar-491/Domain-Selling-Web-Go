@@ -102,3 +102,24 @@ func (r *DNSRepository) GetDomainByNameAndUser(domainName string, userID uint) (
 	}
 	return &domain, nil
 }
+
+// UpdateDomainNameservers updates the nameservers string on the Domain model
+func (r *DNSRepository) UpdateDomainNameservers(domainID uint, nameservers string) error {
+	return r.db.Model(&models.Domain{}).Where("id = ?", domainID).Update("nameservers", nameservers).Error
+}
+
+// DeleteNSRecordsByDomain deletes all NS records for a domain
+func (r *DNSRepository) DeleteNSRecordsByDomain(domainID uint) error {
+	return r.db.Where("domain_id = ? AND record_type = ?", domainID, models.DNSRecordTypeNS).Delete(&models.DNSRecord{}).Error
+}
+
+// UpdateNSRecordsSyncStatus updates sync status for all NS records of a domain
+func (r *DNSRepository) UpdateNSRecordsSyncStatus(domainID uint, status models.DNSSyncStatus, syncError string) error {
+	return r.db.Model(&models.DNSRecord{}).
+		Where("domain_id = ? AND record_type = ?", domainID, models.DNSRecordTypeNS).
+		Updates(map[string]interface{}{
+			"sync_status": status,
+			"sync_error":  syncError,
+		}).Error
+}
+

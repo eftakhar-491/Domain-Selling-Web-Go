@@ -38,6 +38,12 @@ type DeleteDNSByHostRequest struct {
 	HostName   string `json:"hostName" validate:"required"`
 }
 
+// UpdateNameServerRequest is the payload for updating nameservers for a domain
+type UpdateNameServerRequest struct {
+	DomainName  string   `json:"domainName" validate:"required"`
+	NameServers []string `json:"nameServers" validate:"required,min=1"`
+}
+
 // ============================================================
 // RESPONSE DTOs
 // ============================================================
@@ -64,4 +70,14 @@ type DNSRecordListResponse struct {
 	Records    []DNSRecordResponse `json:"records"`
 	DomainName string              `json:"domain_name"`
 	TotalCount int64               `json:"total_count"`
+}
+
+// NameServerResponse represents nameserver details for a domain
+type NameServerResponse struct {
+	DomainID    uint     `json:"domain_id"`
+	DomainName  string   `json:"domainName"`
+	NameServers []string `json:"nameServers"`
+	SyncStatus  string   `json:"sync_status"`
+	SyncError   string   `json:"sync_error,omitempty"`
+	UpdatedAt   string   `json:"updated_at"`
 }

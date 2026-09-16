@@ -16,6 +16,10 @@ func DNSRoutes(r *echo.Group, db *gorm.DB) {
 	// All DNS routes require JWT authentication
 	r.Use(middleware.JWTMiddleware)
 
+	// Nameserver management (registered before /:id)
+	r.PUT("/name-server", handler.UpdateNameServers) // Update nameservers + sync via PUT to DNA API
+	r.GET("/name-server", handler.GetNameServers)     // Get nameservers for domain (?domain=...)
+
 	// CRUD operations
 	r.POST("", handler.CreateRecord)                // Create DNS record + sync to DNA API (POST)
 	r.GET("", handler.GetRecordsByDomain)            // List DNS records (optionally filter by ?domain=)

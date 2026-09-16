@@ -8,6 +8,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 
 	"project-setup/internal/config"
@@ -56,6 +57,12 @@ type DNAIPAddressItem struct {
 	IPVersion string `json:"ipVersion"`
 }
 
+// DNANameServerRequest is the body sent to PUT /domains/dns/name-server
+type DNANameServerRequest struct {
+	DomainName  string   `json:"domainName"`
+	NameServers []string `json:"nameServers"`
+}
+
 // DNADNSHostResponse is the response from the DNA API
 type DNADNSHostResponse struct {
 	Success bool   `json:"success"`
@@ -99,6 +106,8 @@ func setDNAHeaders(req *http.Request, cfg *dnaConfig) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("__reseller", cfg.ResellerID)
 	req.Header.Set("X-API-KEY", cfg.APIKey)
+	req.Header.Set("DNA_RESELLER_ID", cfg.ResellerID)
+	req.Header.Set("DNA_API_KEY", cfg.APIKey)
 	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64)")
 }
 
@@ -259,6 +268,54 @@ func (rc *DNAResellerClient) DeleteDNSHost(domainName string, hostName string) (
 	}
 
 	log.Printf("[DNS-Reseller] ✅ DNS host deleted successfully: %s → %s", domainName, hostName)
+	return result, nil
+}
+
+// ============================================================
+// UPDATE NAMESERVERS — PUT /domains/dns/name-server
+// ============================================================
+
+// UpdateNameServer updates nameservers for a domain via the DNA reseller API (PUT)
+func (rc *DNAResellerClient) UpdateNameServer(domainName string, nameServers []string) (*DNADNSHostResponse, error) {
+	cfg, err := getDNAConfig()
+	if err != nil {
+		return nil, err
+	}
+
+	reqBody := DNANameServerRequest{
+		DomainName:  domainName,
+		NameServers: nameServers,
+	}
+
+	jsonData, err := json.Marshal(reqBody)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal nameserver request: %w", err)
+	}
+
+	baseURL := cfg.BaseURL
+	var apiURL string
+	if strings.HasSuffix(baseURL, "/domains/dns/name-server") {
+		apiURL = baseURL
+	} else {
+		apiURL = strings.TrimRight(baseURL, "/") + "/domains/dns/name-server"
+	}
+
+	req, err := http.NewRequest(http.MethodPut, apiURL, bytes.NewBuffer(jsonData))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create nameserver update request: %w", err)
+	}
+
+	setDNAHeaders(req, cfg)
+
+	log.Printf("[DNS-Reseller] PUT nameserver: %s → %v → %s", domainName, nameServers, apiURL)
+	log.Printf("[DNS-Reseller] Request body: %s", string(jsonData))
+
+	result, err := rc.executeDNARequest(req)
+	if err != nil {
+		return nil, err
+	}
+
+	log.Printf("[DNS-Reseller] ✅ Nameservers updated successfully for %s: %v", domainName, nameServers)
 	return result, nil
 }
 
