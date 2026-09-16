@@ -18,12 +18,16 @@ func StartServer(db *gorm.DB, redisClient *redis.Client) {
 	e.Validator = customValidator.New()
 	e.Use(middleware.RequestLogger())
 	e.Use(middleware.Recover())
+	allowedOrigins := []string{
+		"http://localhost:3000",
+		"http://localhost:5173",
+	}
+	if fe := os.Getenv("FRONTEND_URL"); fe != "" {
+		allowedOrigins = append(allowedOrigins, fe)
+	}
+
 	e.Use(middleware.CORSWithConfig(middleware.CORSConfig{
-		AllowOrigins: []string{
-			"http://localhost:3000",
-			"http://localhost:5173",
-			os.Getenv("FRONTEND_URL"),
-		},
+		AllowOrigins: allowedOrigins,
 		AllowMethods: []string{
 			http.MethodGet,
 			http.MethodPost,
@@ -31,6 +35,7 @@ func StartServer(db *gorm.DB, redisClient *redis.Client) {
 			http.MethodPatch,
 			http.MethodDelete,
 			http.MethodOptions,
+			http.MethodHead,
 		},
 		AllowHeaders: []string{
 			"Origin",
@@ -39,6 +44,17 @@ func StartServer(db *gorm.DB, redisClient *redis.Client) {
 			"Authorization",
 		},
 	}))
+
+	// Root Health Check Handlers (used by Render & uptime monitoring)
+	e.GET("/", func(c *echo.Context) error {
+		return c.JSON(http.StatusOK, map[string]string{
+			"status":  "healthy",
+			"message": "Domain Selling API is running successfully!",
+		})
+	})
+	e.HEAD("/", func(c *echo.Context) error {
+		return c.NoContent(http.StatusOK)
+	})
 
 	// API Version 1 Group
 	r := e.Group("/api/v1")
