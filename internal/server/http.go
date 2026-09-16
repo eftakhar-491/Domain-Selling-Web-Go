@@ -22,6 +22,7 @@ func StartServer(db *gorm.DB, redisClient *redis.Client) {
 		AllowOrigins: []string{
 			"http://localhost:3000",
 			"http://localhost:5173",
+			os.Getenv("FRONTEND_URL"),
 		},
 		AllowMethods: []string{
 			http.MethodGet,
