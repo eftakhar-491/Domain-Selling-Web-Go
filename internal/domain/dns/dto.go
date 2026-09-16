@@ -7,7 +7,7 @@ package dns
 // IPAddressInput represents a single IP address entry from the client
 type IPAddressInput struct {
 	IPAddress string `json:"ipAddress" validate:"required"`
-	IPVersion string `json:"ipVersion" validate:"required,oneof=IPv4 IPv6"`
+	IPVersion string `json:"ipVersion"`
 }
 
 // CreateDNSRecordRequest is the payload for creating/adding a DNS host record
