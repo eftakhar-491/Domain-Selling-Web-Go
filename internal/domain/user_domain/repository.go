@@ -1,6 +1,7 @@
 package user_domain
 
 import (
+	"errors"
 	"strings"
 	"time"
 
@@ -17,15 +18,94 @@ func NewDomainRepository(db *gorm.DB) *DomainRepository {
 	return &DomainRepository{db: db}
 }
 
-// GetDomainsByUserID retrieves all domains owned by the user, with optional search query
+// GetDomainsByUserID retrieves domains owned by the user, dynamically synced from orders
 func (r *DomainRepository) GetDomainsByUserID(userID uint, search string) ([]models.Domain, error) {
-	// If the user has no domains, seed starter domains automatically
-	var count int64
-	r.db.Model(&models.Domain{}).Where("user_id = ?", userID).Count(&count)
-	if count == 0 {
-		_ = r.SeedStarterDomains(userID)
+	// 1. Clean up legacy seeded starter domains that were never ordered by this user
+	legacyStarters := []string{"orbitstudio.com", "nexora.io", "wearebengal.bd", "kinetic.xyz", "arifspace.dev"}
+	for _, starterName := range legacyStarters {
+		var orderCount int64
+		r.db.Table("order_items").
+			Joins("JOIN orders ON orders.id = order_items.order_id").
+			Where("orders.user_id = ? AND LOWER(order_items.domain_name) = ?", userID, strings.ToLower(starterName)).
+			Count(&orderCount)
+		if orderCount == 0 {
+			r.db.Where("user_id = ? AND LOWER(domain_name) = ?", userID, strings.ToLower(starterName)).
+				Delete(&models.Domain{})
+		}
 	}
 
+	// 2. Sync ordered domains from orders and order_items into models.Domain
+	var orderItems []struct {
+		DomainName    string
+		TLD           string
+		Period        int
+		OrderStatus   models.OrderStatus
+		PaymentStatus models.PaymentStatus
+		CreatedAt     time.Time
+	}
+
+	r.db.Table("order_items").
+		Select("order_items.domain_name, order_items.tld, order_items.period, orders.status as order_status, orders.payment_status, orders.created_at").
+		Joins("JOIN orders ON orders.id = order_items.order_id").
+		Where("orders.user_id = ? AND orders.status NOT IN (?)", userID, []models.OrderStatus{models.OrderStatusCancelled, models.OrderStatusFailed}).
+		Scan(&orderItems)
+
+	for _, oi := range orderItems {
+		dName := strings.ToLower(strings.TrimSpace(oi.DomainName))
+		if dName == "" {
+			continue
+		}
+
+		var existing models.Domain
+		err := r.db.Where("user_id = ? AND LOWER(domain_name) = ?", userID, dName).First(&existing).Error
+		if err != nil && errors.Is(err, gorm.ErrRecordNotFound) {
+			status := models.DomainStatusPending
+			if oi.OrderStatus == models.OrderStatusPaid || oi.OrderStatus == models.OrderStatusCompleted || oi.PaymentStatus == models.PaymentStatusPaid {
+				status = models.DomainStatusActive
+			}
+
+			period := oi.Period
+			if period < 1 {
+				period = 1
+			}
+			regDate := oi.CreatedAt
+			if regDate.IsZero() {
+				regDate = time.Now()
+			}
+			expiresAt := regDate.AddDate(period, 0, 0)
+
+			tld := oi.TLD
+			if tld == "" {
+				parts := strings.Split(dName, ".")
+				if len(parts) > 1 {
+					tld = strings.Join(parts[1:], ".")
+				} else {
+					tld = "com"
+				}
+			}
+
+			newDomain := models.Domain{
+				UserID:            userID,
+				DomainName:        dName,
+				TLD:               tld,
+				Status:            status,
+				AutoRenew:         true,
+				RegistrationDate:  regDate,
+				ExpiresAt:         expiresAt,
+				PrivacyProtection: true,
+				Nameservers:       "ns1.domain.bd,ns2.domain.bd",
+			}
+			_ = r.db.Create(&newDomain).Error
+		} else if err == nil {
+			if (oi.OrderStatus == models.OrderStatusPaid || oi.OrderStatus == models.OrderStatusCompleted || oi.PaymentStatus == models.PaymentStatusPaid) &&
+				existing.Status == models.DomainStatusPending {
+				existing.Status = models.DomainStatusActive
+				_ = r.db.Save(&existing).Error
+			}
+		}
+	}
+
+	// 3. Query all domains owned by the user
 	query := r.db.Where("user_id = ?", userID)
 	if strings.TrimSpace(search) != "" {
 		searchTerm := "%" + strings.ToLower(strings.TrimSpace(search)) + "%"
@@ -60,76 +140,4 @@ func (r *DomainRepository) UpdateDomain(domain *models.Domain) error {
 // DeleteDomain deletes a domain record
 func (r *DomainRepository) DeleteDomain(domainID uint, userID uint) error {
 	return r.db.Where("id = ? AND user_id = ?", domainID, userID).Delete(&models.Domain{}).Error
-}
-
-// SeedStarterDomains populates realistic starter domains for a user if they have none
-func (r *DomainRepository) SeedStarterDomains(userID uint) error {
-	now := time.Now()
-	starterDomains := []models.Domain{
-		{
-			UserID:            userID,
-			DomainName:        "orbitstudio.com",
-			TLD:               "com",
-			Status:            models.DomainStatusActive,
-			AutoRenew:         true,
-			RegistrationDate:  now.AddDate(-1, 2, 0),
-			ExpiresAt:         now.AddDate(1, 1, 9),
-			PrivacyProtection: true,
-			Nameservers:       "ns1.domain.bd,ns2.domain.bd",
-		},
-		{
-			UserID:            userID,
-			DomainName:        "nexora.io",
-			TLD:               "io",
-			Status:            models.DomainStatusActive,
-			AutoRenew:         true,
-			RegistrationDate:  now.AddDate(-1, 0, 0),
-			ExpiresAt:         now.AddDate(0, 8, 24),
-			PrivacyProtection: true,
-			Nameservers:       "ns1.domain.bd,ns2.domain.bd",
-		},
-		{
-			UserID:            userID,
-			DomainName:        "wearebengal.bd",
-			TLD:               "bd",
-			Status:            models.DomainStatusExpiringSoon,
-			AutoRenew:         false,
-			RegistrationDate:  now.AddDate(-1, -1, 0),
-			ExpiresAt:         now.AddDate(0, 0, 18),
-			PrivacyProtection: true,
-			Nameservers:       "ns1.btcl.gov.bd,ns2.btcl.gov.bd",
-		},
-		{
-			UserID:            userID,
-			DomainName:        "kinetic.xyz",
-			TLD:               "xyz",
-			Status:            models.DomainStatusActive,
-			AutoRenew:         true,
-			RegistrationDate:  now.AddDate(0, -2, 0),
-			ExpiresAt:         now.AddDate(0, 10, 2),
-			PrivacyProtection: true,
-			Nameservers:       "ns1.domain.bd,ns2.domain.bd",
-		},
-		{
-			UserID:            userID,
-			DomainName:        "arifspace.dev",
-			TLD:               "dev",
-			Status:            models.DomainStatusActive,
-			AutoRenew:         true,
-			RegistrationDate:  now.AddDate(0, -6, 0),
-			ExpiresAt:         now.AddDate(1, 6, 12),
-			PrivacyProtection: true,
-			Nameservers:       "ns1.domain.bd,ns2.domain.bd",
-		},
-	}
-
-	for _, d := range starterDomains {
-		// Verify not already exists to prevent duplicate error
-		var existing models.Domain
-		if err := r.db.Where("domain_name = ?", d.DomainName).First(&existing).Error; err != nil {
-			_ = r.db.Create(&d).Error
-		}
-	}
-
-	return nil
 }

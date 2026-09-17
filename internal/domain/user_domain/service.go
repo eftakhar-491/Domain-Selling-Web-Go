@@ -41,6 +41,10 @@ func (s *DomainService) GetUserDomains(userID uint, search string) (*DomainsList
 			status = string(models.DomainStatusExpired)
 			statusLabel = "Expired"
 			tone = "red"
+		} else if d.Status == models.DomainStatusPending {
+			status = string(models.DomainStatusPending)
+			statusLabel = "Pending"
+			tone = "amber"
 		} else if daysUntil <= 30 || d.Status == models.DomainStatusExpiringSoon {
 			status = string(models.DomainStatusExpiringSoon)
 			statusLabel = "Renew soon"
@@ -89,7 +93,9 @@ func (s *DomainService) GetUserDomains(userID uint, search string) (*DomainsList
 	totalDomains := len(items)
 	autoRenewRatio := fmt.Sprintf("%02d / %02d", autoRenewCount, totalDomains)
 	autoRenewNote := "All protected"
-	if autoRenewCount < totalDomains {
+	if totalDomains == 0 {
+		autoRenewNote = "No domains"
+	} else if autoRenewCount < totalDomains {
 		autoRenewNote = fmt.Sprintf("%d needs attention", totalDomains-autoRenewCount)
 	}
 
@@ -204,6 +210,10 @@ func (s *DomainService) toDomainResponse(d *models.Domain) *DomainResponse {
 		status = string(models.DomainStatusExpired)
 		statusLabel = "Expired"
 		tone = "red"
+	} else if d.Status == models.DomainStatusPending {
+		status = string(models.DomainStatusPending)
+		statusLabel = "Pending"
+		tone = "amber"
 	} else if daysUntil <= 30 || d.Status == models.DomainStatusExpiringSoon {
 		status = string(models.DomainStatusExpiringSoon)
 		statusLabel = "Renew soon"
