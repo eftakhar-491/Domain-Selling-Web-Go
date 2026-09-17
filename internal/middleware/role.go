@@ -19,7 +19,7 @@ func RequireRole(allowedRoles ...string) echo.MiddlewareFunc {
 		return func(c *echo.Context) error {
 			userRole, ok := c.Get("role").(string)
 			if !ok || userRole == "" {
-				return utils.ErrorResponse(c, http.StatusUnauthorized, "Authentication required")
+				return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to access this feature")
 			}
 
 			for _, role := range allowedRoles {
@@ -28,7 +28,7 @@ func RequireRole(allowedRoles ...string) echo.MiddlewareFunc {
 				}
 			}
 
-			return utils.ErrorResponse(c, http.StatusForbidden, "Access denied. Required role(s): "+joinRoles(allowedRoles))
+			return utils.ErrorResponse(c, http.StatusForbidden, "You don't have permission to access this feature")
 		}
 	}
 }

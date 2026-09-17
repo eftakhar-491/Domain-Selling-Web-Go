@@ -28,16 +28,16 @@ func NewDNSHandler(service *DNSService) *DNSHandler {
 func (h *DNSHandler) CreateRecord(c *echo.Context) error {
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
-		return utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user session")
+		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
 	var req CreateDNSRecordRequest
 	if err := c.Bind(&req); err != nil {
-		return utils.ErrorResponse(c, http.StatusBadRequest, "Invalid request body")
+		return utils.ErrorResponse(c, http.StatusBadRequest, "We couldn't process your request. Please check the form and try again")
 	}
 
 	if err := c.Validate(&req); err != nil {
-		return utils.ErrorResponse(c, http.StatusBadRequest, "Validation failed: "+err.Error())
+		return utils.ErrorResponse(c, http.StatusBadRequest, "Please fill in all required fields correctly")
 	}
 
 	records, err := h.service.CreateDNSRecord(userID, req)
@@ -57,7 +57,7 @@ func (h *DNSHandler) CreateRecord(c *echo.Context) error {
 func (h *DNSHandler) GetRecordsByDomain(c *echo.Context) error {
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
-		return utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user session")
+		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
 	domainName := c.QueryParam("domain")
@@ -83,12 +83,12 @@ func (h *DNSHandler) GetRecordsByDomain(c *echo.Context) error {
 func (h *DNSHandler) GetRecordByID(c *echo.Context) error {
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
-		return utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user session")
+		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
 	recordID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		return utils.ErrorResponse(c, http.StatusBadRequest, "Invalid record ID")
+		return utils.ErrorResponse(c, http.StatusBadRequest, "The requested DNS record could not be found")
 	}
 
 	record, err := h.service.GetDNSRecordByID(userID, uint(recordID))
@@ -108,17 +108,17 @@ func (h *DNSHandler) GetRecordByID(c *echo.Context) error {
 func (h *DNSHandler) UpdateRecord(c *echo.Context) error {
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
-		return utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user session")
+		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
 	recordID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		return utils.ErrorResponse(c, http.StatusBadRequest, "Invalid record ID")
+		return utils.ErrorResponse(c, http.StatusBadRequest, "The requested DNS record could not be found")
 	}
 
 	var req UpdateDNSRecordRequest
 	if err := c.Bind(&req); err != nil {
-		return utils.ErrorResponse(c, http.StatusBadRequest, "Invalid request body")
+		return utils.ErrorResponse(c, http.StatusBadRequest, "We couldn't process your request. Please check the form and try again")
 	}
 
 	record, err := h.service.UpdateDNSRecord(userID, uint(recordID), req)
@@ -138,12 +138,12 @@ func (h *DNSHandler) UpdateRecord(c *echo.Context) error {
 func (h *DNSHandler) DeleteRecord(c *echo.Context) error {
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
-		return utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user session")
+		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
 	recordID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		return utils.ErrorResponse(c, http.StatusBadRequest, "Invalid record ID")
+		return utils.ErrorResponse(c, http.StatusBadRequest, "The requested DNS record could not be found")
 	}
 
 	if err := h.service.DeleteDNSRecord(userID, uint(recordID)); err != nil {
@@ -158,14 +158,14 @@ func (h *DNSHandler) DeleteRecord(c *echo.Context) error {
 func (h *DNSHandler) DeleteByHost(c *echo.Context) error {
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
-		return utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user session")
+		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
 	domainName := c.QueryParam("domainName")
 	hostName := c.QueryParam("hostName")
 
 	if domainName == "" || hostName == "" {
-		return utils.ErrorResponse(c, http.StatusBadRequest, "domainName and hostName query parameters are required")
+		return utils.ErrorResponse(c, http.StatusBadRequest, "Please specify both domain and host name")
 	}
 
 	req := DeleteDNSByHostRequest{
@@ -189,12 +189,12 @@ func (h *DNSHandler) DeleteByHost(c *echo.Context) error {
 func (h *DNSHandler) ResyncRecord(c *echo.Context) error {
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
-		return utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user session")
+		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
 	recordID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		return utils.ErrorResponse(c, http.StatusBadRequest, "Invalid record ID")
+		return utils.ErrorResponse(c, http.StatusBadRequest, "The requested DNS record could not be found")
 	}
 
 	record, err := h.service.ResyncDNSRecord(userID, uint(recordID))
@@ -214,16 +214,16 @@ func (h *DNSHandler) ResyncRecord(c *echo.Context) error {
 func (h *DNSHandler) UpdateNameServers(c *echo.Context) error {
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
-		return utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user session")
+		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
 	var req UpdateNameServerRequest
 	if err := c.Bind(&req); err != nil {
-		return utils.ErrorResponse(c, http.StatusBadRequest, "Invalid request body")
+		return utils.ErrorResponse(c, http.StatusBadRequest, "We couldn't process your request. Please check the form and try again")
 	}
 
 	if err := c.Validate(&req); err != nil {
-		return utils.ErrorResponse(c, http.StatusBadRequest, "Validation failed: "+err.Error())
+		return utils.ErrorResponse(c, http.StatusBadRequest, "Please fill in all required fields correctly")
 	}
 
 	result, err := h.service.UpdateNameServers(userID, req)
@@ -239,7 +239,7 @@ func (h *DNSHandler) UpdateNameServers(c *echo.Context) error {
 func (h *DNSHandler) GetNameServers(c *echo.Context) error {
 	userID, ok := c.Get("user_id").(uint)
 	if !ok {
-		return utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user session")
+		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
 	domainName := c.QueryParam("domain")
@@ -247,7 +247,7 @@ func (h *DNSHandler) GetNameServers(c *echo.Context) error {
 		domainName = c.QueryParam("domainName")
 	}
 	if domainName == "" {
-		return utils.ErrorResponse(c, http.StatusBadRequest, "domain query parameter is required")
+		return utils.ErrorResponse(c, http.StatusBadRequest, "Please select a domain to view nameservers")
 	}
 
 	result, err := h.service.GetNameServers(userID, domainName)
