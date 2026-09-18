@@ -13,6 +13,7 @@ import (
 
 	"project-setup/internal/domain/discount"
 	"project-setup/internal/models"
+	"project-setup/internal/pkg/mail"
 	stripepkg "project-setup/internal/pkg/stripe"
 
 	stripe "github.com/stripe/stripe-go/v78"
@@ -444,7 +445,7 @@ func (s *OrderService) GetUserOrders(userID uint, page, limit int) (*OrderListRe
 }
 
 // AdminGetAllOrders returns a paginated list of all orders (admin/super-admin only)
-func (s *OrderService) AdminGetAllOrders(page, limit int, status string) (*OrderListResponse, error) {
+func (s *OrderService) AdminGetAllOrders(page, limit int, status string, search string) (*OrderListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -452,12 +453,69 @@ func (s *OrderService) AdminGetAllOrders(page, limit int, status string) (*Order
 		limit = 10
 	}
 
-	orders, total, err := s.repo.GetAllOrders(page, limit, status)
+	orders, total, err := s.repo.GetAllOrders(page, limit, status, search)
 	if err != nil {
 		return nil, errors.New("failed to fetch orders")
 	}
 
 	return s.buildOrderListResponse(orders, total, page, limit), nil
+}
+
+// SendPaymentReminder sends an email reminder to customer for unpaid orders
+func (s *OrderService) SendPaymentReminder(orderID uint) error {
+	order, err := s.repo.GetOrderByID(orderID)
+	if err != nil {
+		return errors.New("order not found")
+	}
+
+	if order.PaymentStatus == models.PaymentStatusPaid {
+		return errors.New("order is already paid")
+	}
+
+	if order.User.Email == "" {
+		return errors.New("customer email not found for this order")
+	}
+
+	subject := fmt.Sprintf("Payment Reminder: Domain Order #%s", order.OrderNumber)
+	body := fmt.Sprintf(`Hello %s,<br><br>
+This is a reminder that payment for your domain order <strong>#%s</strong> (Total: %s %.2f) is still pending.<br><br>
+Please complete your payment to secure your domain registration before it becomes available for others to register.<br><br>
+Thank you for choosing domain.bd!`,
+		order.User.Name,
+		order.OrderNumber,
+		order.Currency,
+		order.TotalAmount,
+	)
+
+	return mail.SendNotificationEmail(order.User.Email, subject, body)
+}
+
+// AdminUpdateOrderStatus allows admin to update the order status and/or payment status
+func (s *OrderService) AdminUpdateOrderStatus(orderID uint, req AdminUpdateOrderStatusRequest) (*OrderResponse, error) {
+	order, err := s.repo.GetOrderByID(orderID)
+	if err != nil {
+		return nil, errors.New("order not found")
+	}
+
+	if req.Status != "" {
+		order.Status = models.OrderStatus(req.Status)
+	}
+	if req.PaymentStatus != "" {
+		order.PaymentStatus = models.PaymentStatus(req.PaymentStatus)
+	}
+
+	if err := s.repo.UpdateOrder(order); err != nil {
+		return nil, errors.New("failed to update order: " + err.Error())
+	}
+
+	// If marked paid, update items to active and trigger registration
+	if order.PaymentStatus == models.PaymentStatusPaid {
+		_ = s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusActive)
+		go s.resellerService.RegisterOrderDomains(order)
+	}
+
+	fresh, _ := s.repo.GetOrderByID(order.ID)
+	return s.buildOrderResponse(fresh, false), nil
 }
 
 // ============================================================
@@ -498,12 +556,22 @@ func (s *OrderService) buildOrderResponse(order *models.Order, includeClientSecr
 		CreatedAt:             order.CreatedAt.Format(time.RFC3339),
 	}
 
+	if order.User.ID > 0 {
+		resp.User = &OrderUserResponse{
+			ID:          order.User.ID,
+			Name:        order.User.Name,
+			Email:       order.User.Email,
+			PhoneNumber: order.User.PhoneNumber,
+		}
+	}
+
 	if includeClientSecret {
 		resp.StripeClientSecret = order.StripeClientSecret
 	}
 
 	return resp
 }
+
 
 func (s *OrderService) buildOrderListResponse(orders []models.Order, total int64, page, limit int) *OrderListResponse {
 	var orderResponses []OrderResponse

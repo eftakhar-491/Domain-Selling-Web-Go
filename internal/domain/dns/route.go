@@ -29,4 +29,7 @@ func DNSRoutes(r *echo.Group, db *gorm.DB) {
 	r.DELETE("/host", handler.DeleteByHost)           // Delete by domain+host → syncs DELETE to DNA API
 	r.DELETE("/:id", handler.DeleteRecord)           // Delete single record by ID → syncs DELETE to DNA API
 	r.POST("/:id/resync", handler.ResyncRecord)      // Re-sync failed record to DNA API
+
+	// Admin routes
+	r.GET("/admin/zones", handler.AdminGetAllZones, middleware.RequireRole("ADMIN", "SUPERADMIN"))
 }

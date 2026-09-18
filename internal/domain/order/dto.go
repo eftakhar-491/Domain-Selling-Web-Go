@@ -42,6 +42,14 @@ type OrderItemResponse struct {
 	Status         string  `json:"status"`
 }
 
+// OrderUserResponse represents the customer who placed the order
+type OrderUserResponse struct {
+	ID          uint    `json:"id"`
+	Name        string  `json:"name"`
+	Email       string  `json:"email"`
+	PhoneNumber *string `json:"phone_number,omitempty"`
+}
+
 // OrderResponse is the full order detail returned to the client
 type OrderResponse struct {
 	ID                    uint                `json:"id"`
@@ -60,6 +68,7 @@ type OrderResponse struct {
 	StripeClientSecret    string              `json:"stripe_client_secret,omitempty"`
 	StripePaymentIntentID string              `json:"stripe_payment_intent_id,omitempty"`
 	CreatedAt             string              `json:"created_at"`
+	User                  *OrderUserResponse  `json:"user,omitempty"`
 }
 
 // OrderListResponse is a paginated list of orders
@@ -70,3 +79,10 @@ type OrderListResponse struct {
 	Limit      int             `json:"limit"`
 	TotalPages int             `json:"total_pages"`
 }
+
+// AdminUpdateOrderStatusRequest allows admin to update order and payment statuses
+type AdminUpdateOrderStatusRequest struct {
+	Status        string `json:"status" validate:"omitempty,oneof=PENDING_PAYMENT PAID PROCESSING COMPLETED CANCELLED FAILED"`
+	PaymentStatus string `json:"payment_status" validate:"omitempty,oneof=PENDING PAID FAILED REFUNDED"`
+}
+

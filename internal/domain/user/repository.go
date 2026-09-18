@@ -25,13 +25,20 @@ func (r *UserRepository) FindByID(id uint) (*models.User, error) {
 	return &user, nil
 }
 
-// FindAll returns a paginated list of users
-func (r *UserRepository) FindAll(page, limit int) ([]models.User, int64, error) {
+// FindAll returns a paginated list of users with optional search
+func (r *UserRepository) FindAll(page, limit int, search string) ([]models.User, int64, error) {
 	var users []models.User
 	var total int64
 
+	query := r.db.Model(&models.User{})
+
+	if search != "" {
+		s := "%" + search + "%"
+		query = query.Where("LOWER(name) LIKE LOWER(?) OR LOWER(email) LIKE LOWER(?)", s, s)
+	}
+
 	// Count total records
-	if err := r.db.Model(&models.User{}).Count(&total).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
@@ -39,11 +46,44 @@ func (r *UserRepository) FindAll(page, limit int) ([]models.User, int64, error) 
 	offset := (page - 1) * limit
 
 	// Fetch paginated results
-	if err := r.db.Offset(offset).Limit(limit).Order("created_at DESC").Find(&users).Error; err != nil {
+	if err := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&users).Error; err != nil {
 		return nil, 0, err
 	}
 
 	return users, total, nil
+}
+
+// GetAdminStats computes aggregated platform metrics
+func (r *UserRepository) GetAdminStats() (*AdminStatsResponse, error) {
+	var stats AdminStatsResponse
+
+	// User metrics
+	r.db.Model(&models.User{}).Count(&stats.TotalUsers)
+	r.db.Model(&models.User{}).Where("is_active = ?", true).Count(&stats.ActiveUsers)
+
+	// Domain metrics
+	r.db.Model(&models.Domain{}).Count(&stats.TotalDomains)
+	r.db.Model(&models.Domain{}).Where("status = ?", models.DomainStatusActive).Count(&stats.ActiveDomains)
+
+	// Order metrics
+	r.db.Model(&models.Order{}).Count(&stats.TotalOrders)
+	r.db.Model(&models.Order{}).Where("payment_status = ?", models.PaymentStatusPaid).Count(&stats.PaidOrders)
+	r.db.Model(&models.Order{}).Where("payment_status = ?", models.PaymentStatusPending).Count(&stats.PendingOrders)
+
+	// Revenue: sum of total_amount where payment_status is PAID
+	var rev struct {
+		Total float64
+	}
+	r.db.Model(&models.Order{}).
+		Select("COALESCE(SUM(total_amount), 0) as total").
+		Where("payment_status = ?", models.PaymentStatusPaid).
+		Scan(&rev)
+	stats.TotalRevenue = rev.Total
+
+	// Discount metrics
+	r.db.Model(&models.Discount{}).Count(&stats.TotalDiscounts)
+
+	return &stats, nil
 }
 
 // Update saves changes to an existing user
@@ -55,3 +95,4 @@ func (r *UserRepository) Update(user *models.User) error {
 func (r *UserRepository) Delete(id uint) error {
 	return r.db.Delete(&models.User{}, id).Error
 }
+

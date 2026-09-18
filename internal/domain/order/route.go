@@ -35,4 +35,6 @@ func OrderRoutes(r *echo.Group, db *gorm.DB) {
 
 	// Admin-only routes
 	protected.GET("/admin/all", handler.AdminGetAllOrders, middleware.RequireRole("ADMIN", "SUPERADMIN"))
+	protected.POST("/admin/:id/reminder", handler.SendPaymentReminder, middleware.RequireRole("ADMIN", "SUPERADMIN"))
+	protected.PUT("/admin/:id/status", handler.AdminUpdateOrderStatus, middleware.RequireRole("ADMIN", "SUPERADMIN"))
 }

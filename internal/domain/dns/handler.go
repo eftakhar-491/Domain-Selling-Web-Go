@@ -31,6 +31,9 @@ func (h *DNSHandler) CreateRecord(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
+	role, _ := c.Get("role").(string)
+	isAdmin := role == "ADMIN" || role == "SUPERADMIN"
+
 	var req CreateDNSRecordRequest
 	if err := c.Bind(&req); err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, "We couldn't process your request. Please check the form and try again")
@@ -40,7 +43,7 @@ func (h *DNSHandler) CreateRecord(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusBadRequest, "Please fill in all required fields correctly")
 	}
 
-	records, err := h.service.CreateDNSRecord(userID, req)
+	records, err := h.service.CreateDNSRecord(userID, req, isAdmin)
 	if err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, err.Error())
 	}
@@ -60,6 +63,9 @@ func (h *DNSHandler) GetRecordsByDomain(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
+	role, _ := c.Get("role").(string)
+	isAdmin := role == "ADMIN" || role == "SUPERADMIN"
+
 	domainName := c.QueryParam("domain")
 	if domainName == "" {
 		// Return all DNS records for the user
@@ -70,7 +76,7 @@ func (h *DNSHandler) GetRecordsByDomain(c *echo.Context) error {
 		return utils.SuccessResponse(c, http.StatusOK, "DNS records retrieved successfully", records)
 	}
 
-	records, err := h.service.GetDNSRecordsByDomain(userID, domainName)
+	records, err := h.service.GetDNSRecordsByDomain(userID, domainName, isAdmin)
 	if err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, err.Error())
 	}
@@ -86,12 +92,15 @@ func (h *DNSHandler) GetRecordByID(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
+	role, _ := c.Get("role").(string)
+	isAdmin := role == "ADMIN" || role == "SUPERADMIN"
+
 	recordID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, "The requested DNS record could not be found")
 	}
 
-	record, err := h.service.GetDNSRecordByID(userID, uint(recordID))
+	record, err := h.service.GetDNSRecordByID(userID, uint(recordID), isAdmin)
 	if err != nil {
 		return utils.ErrorResponse(c, http.StatusNotFound, err.Error())
 	}
@@ -111,6 +120,9 @@ func (h *DNSHandler) UpdateRecord(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
+	role, _ := c.Get("role").(string)
+	isAdmin := role == "ADMIN" || role == "SUPERADMIN"
+
 	recordID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, "The requested DNS record could not be found")
@@ -121,7 +133,7 @@ func (h *DNSHandler) UpdateRecord(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusBadRequest, "We couldn't process your request. Please check the form and try again")
 	}
 
-	record, err := h.service.UpdateDNSRecord(userID, uint(recordID), req)
+	record, err := h.service.UpdateDNSRecord(userID, uint(recordID), req, isAdmin)
 	if err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, err.Error())
 	}
@@ -141,12 +153,15 @@ func (h *DNSHandler) DeleteRecord(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
+	role, _ := c.Get("role").(string)
+	isAdmin := role == "ADMIN" || role == "SUPERADMIN"
+
 	recordID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, "The requested DNS record could not be found")
 	}
 
-	if err := h.service.DeleteDNSRecord(userID, uint(recordID)); err != nil {
+	if err := h.service.DeleteDNSRecord(userID, uint(recordID), isAdmin); err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, err.Error())
 	}
 
@@ -161,6 +176,9 @@ func (h *DNSHandler) DeleteByHost(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
+	role, _ := c.Get("role").(string)
+	isAdmin := role == "ADMIN" || role == "SUPERADMIN"
+
 	domainName := c.QueryParam("domainName")
 	hostName := c.QueryParam("hostName")
 
@@ -173,7 +191,7 @@ func (h *DNSHandler) DeleteByHost(c *echo.Context) error {
 		HostName:   hostName,
 	}
 
-	if err := h.service.DeleteDNSByHost(userID, req); err != nil {
+	if err := h.service.DeleteDNSByHost(userID, req, isAdmin); err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, err.Error())
 	}
 
@@ -192,12 +210,15 @@ func (h *DNSHandler) ResyncRecord(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
+	role, _ := c.Get("role").(string)
+	isAdmin := role == "ADMIN" || role == "SUPERADMIN"
+
 	recordID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, "The requested DNS record could not be found")
 	}
 
-	record, err := h.service.ResyncDNSRecord(userID, uint(recordID))
+	record, err := h.service.ResyncDNSRecord(userID, uint(recordID), isAdmin)
 	if err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, err.Error())
 	}
@@ -217,6 +238,9 @@ func (h *DNSHandler) UpdateNameServers(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
+	role, _ := c.Get("role").(string)
+	isAdmin := role == "ADMIN" || role == "SUPERADMIN"
+
 	var req UpdateNameServerRequest
 	if err := c.Bind(&req); err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, "We couldn't process your request. Please check the form and try again")
@@ -226,7 +250,7 @@ func (h *DNSHandler) UpdateNameServers(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusBadRequest, "Please fill in all required fields correctly")
 	}
 
-	result, err := h.service.UpdateNameServers(userID, req)
+	result, err := h.service.UpdateNameServers(userID, req, isAdmin)
 	if err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, err.Error())
 	}
@@ -242,6 +266,9 @@ func (h *DNSHandler) GetNameServers(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusUnauthorized, "Please log in to continue")
 	}
 
+	role, _ := c.Get("role").(string)
+	isAdmin := role == "ADMIN" || role == "SUPERADMIN"
+
 	domainName := c.QueryParam("domain")
 	if domainName == "" {
 		domainName = c.QueryParam("domainName")
@@ -250,11 +277,22 @@ func (h *DNSHandler) GetNameServers(c *echo.Context) error {
 		return utils.ErrorResponse(c, http.StatusBadRequest, "Please select a domain to view nameservers")
 	}
 
-	result, err := h.service.GetNameServers(userID, domainName)
+	result, err := h.service.GetNameServers(userID, domainName, isAdmin)
 	if err != nil {
 		return utils.ErrorResponse(c, http.StatusBadRequest, err.Error())
 	}
 
 	return utils.SuccessResponse(c, http.StatusOK, "Nameservers retrieved successfully", result)
 }
+
+// AdminGetAllZones returns all active DNS zones for the admin dashboard
+// GET /api/v1/dns/admin/zones
+func (h *DNSHandler) AdminGetAllZones(c *echo.Context) error {
+	zones, err := h.service.AdminGetAllZones()
+	if err != nil {
+		return utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+	}
+	return utils.SuccessResponse(c, http.StatusOK, "DNS zones retrieved successfully", zones)
+}
+
 

@@ -81,3 +81,14 @@ type NameServerResponse struct {
 	SyncError   string   `json:"sync_error,omitempty"`
 	UpdatedAt   string   `json:"updated_at"`
 }
+
+// DNSZoneResponse represents a domain DNS zone summary for admin
+type DNSZoneResponse struct {
+	DomainName  string `json:"domain_name"`
+	UserID      uint   `json:"user_id"`
+	RecordCount int    `json:"record_count"`
+	SyncStatus  string `json:"sync_status"`
+	Nameservers string `json:"nameservers"`
+	UpdatedAt   string `json:"updated_at"`
+}
+

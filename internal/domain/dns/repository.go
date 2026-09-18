@@ -105,6 +105,71 @@ func (r *DNSRepository) GetDomainByNameAndUser(domainName string, userID uint) (
 	return &domain, nil
 }
 
+// GetDomainByName finds a domain record by name across all users (for admin operations)
+func (r *DNSRepository) GetDomainByName(domainName string) (*models.Domain, error) {
+	var domain models.Domain
+	err := r.db.Where("LOWER(domain_name) = LOWER(?)", strings.ToLower(strings.TrimSpace(domainName))).First(&domain).Error
+	if err != nil {
+		return nil, err
+	}
+	return &domain, nil
+}
+
+// GetRecordsByDomainNameAdmin gets all DNS records for a domain across all users
+func (r *DNSRepository) GetRecordsByDomainNameAdmin(domainName string) ([]models.DNSRecord, error) {
+	var records []models.DNSRecord
+	err := r.db.Where("LOWER(domain_name) = LOWER(?)", strings.ToLower(strings.TrimSpace(domainName))).
+		Order("created_at ASC").
+		Find(&records).Error
+	return records, err
+}
+
+// DeleteRecordsByDomainNameAdmin deletes all DNS records for a domain without user scope
+func (r *DNSRepository) DeleteRecordsByDomainNameAdmin(domainName string) error {
+	return r.db.Where("LOWER(domain_name) = LOWER(?)", strings.ToLower(strings.TrimSpace(domainName))).
+		Delete(&models.DNSRecord{}).Error
+}
+
+// DeleteRecordAdmin deletes a DNS record by ID without user scope
+func (r *DNSRepository) DeleteRecordAdmin(id uint) error {
+	return r.db.Delete(&models.DNSRecord{}, id).Error
+}
+
+// GetAllDNSZones returns all domains in the system with their DNS record counts and sync status
+func (r *DNSRepository) GetAllDNSZones() ([]DNSZoneResponse, error) {
+	var domains []models.Domain
+	if err := r.db.Order("domain_name ASC").Find(&domains).Error; err != nil {
+		return nil, err
+	}
+
+	var zones []DNSZoneResponse
+	for _, d := range domains {
+		var count int64
+		r.db.Model(&models.DNSRecord{}).Where("domain_id = ?", d.ID).Count(&count)
+
+		var failedCount int64
+		r.db.Model(&models.DNSRecord{}).Where("domain_id = ? AND sync_status = ?", d.ID, models.DNSSyncStatusFailed).Count(&failedCount)
+
+		status := "Synced"
+		if failedCount > 0 {
+			status = "Failed"
+		} else if count == 0 {
+			status = "No records"
+		}
+
+		zones = append(zones, DNSZoneResponse{
+			DomainName:  d.DomainName,
+			UserID:      d.UserID,
+			RecordCount: int(count),
+			SyncStatus:  status,
+			Nameservers: d.Nameservers,
+			UpdatedAt:   d.UpdatedAt.Format("Jan 02, 2006"),
+		})
+	}
+	return zones, nil
+}
+
+
 // UpdateDomainNameservers updates the nameservers string on the Domain model
 func (r *DNSRepository) UpdateDomainNameservers(domainID uint, nameservers string) error {
 	return r.db.Model(&models.Domain{}).Where("id = ?", domainID).Update("nameservers", nameservers).Error

@@ -34,8 +34,8 @@ func (s *UserService) GetProfile(userID uint) (*ProfileResponse, error) {
 	}, nil
 }
 
-// GetAllUsers returns a paginated list of all users (ADMIN & SUPERADMIN only)
-func (s *UserService) GetAllUsers(page, limit int) (*UserListResponse, error) {
+// GetAllUsers returns a paginated list of all users with optional search (ADMIN & SUPERADMIN only)
+func (s *UserService) GetAllUsers(page, limit int, search string) (*UserListResponse, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -43,7 +43,7 @@ func (s *UserService) GetAllUsers(page, limit int) (*UserListResponse, error) {
 		limit = 10
 	}
 
-	users, total, err := s.repo.FindAll(page, limit)
+	users, total, err := s.repo.FindAll(page, limit, search)
 	if err != nil {
 		return nil, errors.New("failed to fetch users")
 	}
@@ -70,6 +70,52 @@ func (s *UserService) GetAllUsers(page, limit int) (*UserListResponse, error) {
 		TotalPages: totalPages,
 	}, nil
 }
+
+// AdminUpdateUser allows admin/superadmin to edit user details, toggle active status, and assign roles
+func (s *UserService) AdminUpdateUser(targetUserID uint, req AdminUpdateUserRequest, requestingUserRole string) (*ProfileResponse, error) {
+	user, err := s.repo.FindByID(targetUserID)
+	if err != nil {
+		return nil, errors.New("user not found")
+	}
+
+	if req.Name != "" {
+		user.Name = req.Name
+	}
+	if req.Email != "" {
+		user.Email = req.Email
+	}
+	if req.PhoneNumber != nil {
+		user.PhoneNumber = req.PhoneNumber
+	}
+	if req.IsActive != nil {
+		user.IsActive = *req.IsActive
+	}
+	if req.Role != "" {
+		if requestingUserRole != string(models.RoleSuperAdmin) {
+			return nil, errors.New("only a SUPERADMIN can change user roles")
+		}
+		user.Role = models.Role(req.Role)
+	}
+
+	if err := s.repo.Update(user); err != nil {
+		return nil, errors.New("failed to update user details: " + err.Error())
+	}
+
+	return &ProfileResponse{
+		ID:          user.ID,
+		Name:        user.Name,
+		Email:       user.Email,
+		PhoneNumber: user.PhoneNumber,
+		Role:        string(user.Role),
+		IsActive:    user.IsActive,
+	}, nil
+}
+
+// GetAdminStats returns aggregated platform metrics
+func (s *UserService) GetAdminStats() (*AdminStatsResponse, error) {
+	return s.repo.GetAdminStats()
+}
+
 
 // UpdateProfile updates the authenticated user's own profile
 func (s *UserService) UpdateProfile(userID uint, req UpdateProfileRequest) (*ProfileResponse, error) {

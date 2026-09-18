@@ -29,7 +29,7 @@ func NewDNSService(repo *DNSRepository) *DNSService {
 // ============================================================
 
 // CreateDNSRecord saves the DNS record to DB and syncs it to the DNA reseller API
-func (s *DNSService) CreateDNSRecord(userID uint, req CreateDNSRecordRequest) ([]DNSRecordResponse, error) {
+func (s *DNSService) CreateDNSRecord(userID uint, req CreateDNSRecordRequest, isAdmin bool) ([]DNSRecordResponse, error) {
 	domainName := strings.ToLower(strings.TrimSpace(req.DomainName))
 	hostName := strings.TrimSpace(req.HostName)
 
@@ -43,10 +43,16 @@ func (s *DNSService) CreateDNSRecord(userID uint, req CreateDNSRecordRequest) ([
 		return nil, errors.New("Please provide at least one IP address")
 	}
 
-	// Validate that the user owns this domain
-	domain, err := s.repo.GetDomainByNameAndUser(domainName, userID)
+	// Validate that the user owns this domain (or admin bypass)
+	var domain *models.Domain
+	var err error
+	if isAdmin {
+		domain, err = s.repo.GetDomainByName(domainName)
+	} else {
+		domain, err = s.repo.GetDomainByNameAndUser(domainName, userID)
+	}
 	if err != nil {
-		return nil, errors.New("This domain was not found in your account")
+		return nil, errors.New("This domain was not found")
 	}
 
 	// Set defaults
@@ -59,6 +65,11 @@ func (s *DNSService) CreateDNSRecord(userID uint, req CreateDNSRecordRequest) ([
 		ttl = req.TTL
 	}
 
+	recordOwnerID := userID
+	if isAdmin {
+		recordOwnerID = domain.UserID
+	}
+
 	// Save each IP address as a separate DNS record in DB
 	var createdRecords []models.DNSRecord
 	for _, ip := range req.IPAddresses {
@@ -68,7 +79,7 @@ func (s *DNSService) CreateDNSRecord(userID uint, req CreateDNSRecordRequest) ([
 		}
 
 		record := models.DNSRecord{
-			UserID:     userID,
+			UserID:     recordOwnerID,
 			DomainID:   domain.ID,
 			DomainName: domainName,
 			HostName:   hostName,
@@ -104,22 +115,33 @@ func (s *DNSService) CreateDNSRecord(userID uint, req CreateDNSRecordRequest) ([
 // GET DNS RECORDS
 // ============================================================
 
-// GetDNSRecordsByDomain returns all DNS records for a domain name owned by the user
-func (s *DNSService) GetDNSRecordsByDomain(userID uint, domainName string) (*DNSRecordListResponse, error) {
+// GetDNSRecordsByDomain returns all DNS records for a domain name (with admin bypass)
+func (s *DNSService) GetDNSRecordsByDomain(userID uint, domainName string, isAdmin bool) (*DNSRecordListResponse, error) {
 	domainName = strings.ToLower(strings.TrimSpace(domainName))
 	if domainName == "" {
 		return nil, errors.New("Please provide a domain name")
 	}
 
-	// Verify domain ownership
-	_, err := s.repo.GetDomainByNameAndUser(domainName, userID)
-	if err != nil {
-		return nil, errors.New("This domain was not found in your account")
+	var records []models.DNSRecord
+	var err error
+
+	if isAdmin {
+		_, err = s.repo.GetDomainByName(domainName)
+		if err != nil {
+			return nil, errors.New("This domain was not found in the platform")
+		}
+		records, err = s.repo.GetRecordsByDomainNameAdmin(domainName)
+	} else {
+		// Verify domain ownership
+		_, err = s.repo.GetDomainByNameAndUser(domainName, userID)
+		if err != nil {
+			return nil, errors.New("This domain was not found in your account")
+		}
+		records, err = s.repo.GetRecordsByDomainName(userID, domainName)
 	}
 
-	records, err := s.repo.GetRecordsByDomainName(userID, domainName)
 	if err != nil {
-		return nil, errors.New("Unable to load your DNS records. Please try again")
+		return nil, errors.New("Unable to load DNS records. Please try again")
 	}
 
 	var items []DNSRecordResponse
@@ -135,8 +157,14 @@ func (s *DNSService) GetDNSRecordsByDomain(userID uint, domainName string) (*DNS
 }
 
 // GetDNSRecordByID returns a single DNS record by ID
-func (s *DNSService) GetDNSRecordByID(userID uint, recordID uint) (*DNSRecordResponse, error) {
-	record, err := s.repo.GetRecordByIDAndUser(recordID, userID)
+func (s *DNSService) GetDNSRecordByID(userID uint, recordID uint, isAdmin bool) (*DNSRecordResponse, error) {
+	var record *models.DNSRecord
+	var err error
+	if isAdmin {
+		record, err = s.repo.GetRecordByID(recordID)
+	} else {
+		record, err = s.repo.GetRecordByIDAndUser(recordID, userID)
+	}
 	if err != nil {
 		return nil, errors.New("This DNS record could not be found")
 	}
@@ -168,8 +196,14 @@ func (s *DNSService) GetAllUserDNSRecords(userID uint) (*DNSRecordListResponse, 
 // ============================================================
 
 // UpdateDNSRecord updates an existing DNS record and syncs via PUT to DNA API
-func (s *DNSService) UpdateDNSRecord(userID uint, recordID uint, req UpdateDNSRecordRequest) (*DNSRecordResponse, error) {
-	record, err := s.repo.GetRecordByIDAndUser(recordID, userID)
+func (s *DNSService) UpdateDNSRecord(userID uint, recordID uint, req UpdateDNSRecordRequest, isAdmin bool) (*DNSRecordResponse, error) {
+	var record *models.DNSRecord
+	var err error
+	if isAdmin {
+		record, err = s.repo.GetRecordByID(recordID)
+	} else {
+		record, err = s.repo.GetRecordByIDAndUser(recordID, userID)
+	}
 	if err != nil {
 		return nil, errors.New("This DNS record could not be found")
 	}
@@ -232,15 +266,25 @@ func (s *DNSService) UpdateDNSRecord(userID uint, recordID uint, req UpdateDNSRe
 // ============================================================
 
 // DeleteDNSRecord deletes a DNS record from the database and syncs delete to DNA API
-func (s *DNSService) DeleteDNSRecord(userID uint, recordID uint) error {
-	record, err := s.repo.GetRecordByIDAndUser(recordID, userID)
-	if err != nil {
-		return errors.New("This DNS record could not be found")
-	}
-
-	// Delete from local DB
-	if err := s.repo.DeleteRecord(recordID, userID); err != nil {
-		return errors.New("Unable to delete the DNS record. Please try again")
+func (s *DNSService) DeleteDNSRecord(userID uint, recordID uint, isAdmin bool) error {
+	var record *models.DNSRecord
+	var err error
+	if isAdmin {
+		record, err = s.repo.GetRecordByID(recordID)
+		if err != nil {
+			return errors.New("This DNS record could not be found")
+		}
+		if err := s.repo.DeleteRecordAdmin(recordID); err != nil {
+			return errors.New("Unable to delete the DNS record. Please try again")
+		}
+	} else {
+		record, err = s.repo.GetRecordByIDAndUser(recordID, userID)
+		if err != nil {
+			return errors.New("This DNS record could not be found")
+		}
+		if err := s.repo.DeleteRecord(recordID, userID); err != nil {
+			return errors.New("Unable to delete the DNS record. Please try again")
+		}
 	}
 
 	// Sync delete to DNA API (async)
@@ -250,7 +294,7 @@ func (s *DNSService) DeleteDNSRecord(userID uint, recordID uint) error {
 }
 
 // DeleteDNSByHost deletes DNS records by domain + host name and syncs to DNA API
-func (s *DNSService) DeleteDNSByHost(userID uint, req DeleteDNSByHostRequest) error {
+func (s *DNSService) DeleteDNSByHost(userID uint, req DeleteDNSByHostRequest, isAdmin bool) error {
 	domainName := strings.ToLower(strings.TrimSpace(req.DomainName))
 	hostName := strings.TrimSpace(req.HostName)
 
@@ -258,17 +302,27 @@ func (s *DNSService) DeleteDNSByHost(userID uint, req DeleteDNSByHostRequest) er
 		return errors.New("Please specify both domain and host name")
 	}
 
-	// Verify domain ownership
-	_, err := s.repo.GetDomainByNameAndUser(domainName, userID)
-	if err != nil {
-		return fmt.Errorf("domain '%s' not found or you don't have access", domainName)
-	}
-
-	// Delete matching records from local DB
-	records, _ := s.repo.GetRecordsByDomainName(userID, domainName)
-	for _, rec := range records {
-		if strings.EqualFold(rec.HostName, hostName) {
-			_ = s.repo.DeleteRecord(rec.ID, userID)
+	if isAdmin {
+		_, err := s.repo.GetDomainByName(domainName)
+		if err != nil {
+			return fmt.Errorf("domain '%s' not found", domainName)
+		}
+		records, _ := s.repo.GetRecordsByDomainNameAdmin(domainName)
+		for _, rec := range records {
+			if strings.EqualFold(rec.HostName, hostName) {
+				_ = s.repo.DeleteRecordAdmin(rec.ID)
+			}
+		}
+	} else {
+		_, err := s.repo.GetDomainByNameAndUser(domainName, userID)
+		if err != nil {
+			return fmt.Errorf("domain '%s' not found or you don't have access", domainName)
+		}
+		records, _ := s.repo.GetRecordsByDomainName(userID, domainName)
+		for _, rec := range records {
+			if strings.EqualFold(rec.HostName, hostName) {
+				_ = s.repo.DeleteRecord(rec.ID, userID)
+			}
 		}
 	}
 
@@ -283,11 +337,18 @@ func (s *DNSService) DeleteDNSByHost(userID uint, req DeleteDNSByHostRequest) er
 // ============================================================
 
 // ResyncDNSRecord re-syncs a failed DNS record to the DNA API
-func (s *DNSService) ResyncDNSRecord(userID uint, recordID uint) (*DNSRecordResponse, error) {
-	record, err := s.repo.GetRecordByIDAndUser(recordID, userID)
+func (s *DNSService) ResyncDNSRecord(userID uint, recordID uint, isAdmin bool) (*DNSRecordResponse, error) {
+	var record *models.DNSRecord
+	var err error
+	if isAdmin {
+		record, err = s.repo.GetRecordByID(recordID)
+	} else {
+		record, err = s.repo.GetRecordByIDAndUser(recordID, userID)
+	}
 	if err != nil {
 		return nil, errors.New("This DNS record could not be found")
 	}
+
 
 	// Reset sync status
 	record.SyncStatus = models.DNSSyncStatusPending
@@ -445,7 +506,7 @@ func isValidNameserverHostname(host string) bool {
 }
 
 // UpdateNameServers updates nameservers for a domain in DB and syncs to DNA API via PUT
-func (s *DNSService) UpdateNameServers(userID uint, req UpdateNameServerRequest) (*NameServerResponse, error) {
+func (s *DNSService) UpdateNameServers(userID uint, req UpdateNameServerRequest, isAdmin bool) (*NameServerResponse, error) {
 	domainName := strings.ToLower(strings.TrimSpace(req.DomainName))
 	if domainName == "" {
 		return nil, errors.New("Please provide a domain name")
@@ -480,10 +541,16 @@ func (s *DNSService) UpdateNameServers(userID uint, req UpdateNameServerRequest)
 		return nil, errors.New("A maximum of 5 nameservers are allowed")
 	}
 
-	// Verify user ownership
-	domain, err := s.repo.GetDomainByNameAndUser(domainName, userID)
+	// Verify user ownership or admin bypass
+	var domain *models.Domain
+	var err error
+	if isAdmin {
+		domain, err = s.repo.GetDomainByName(domainName)
+	} else {
+		domain, err = s.repo.GetDomainByNameAndUser(domainName, userID)
+	}
 	if err != nil {
-		return nil, errors.New("This domain was not found in your account")
+		return nil, errors.New("This domain was not found")
 	}
 
 	// 1. Save to DB — update domain's nameservers string
@@ -493,11 +560,16 @@ func (s *DNSService) UpdateNameServers(userID uint, req UpdateNameServerRequest)
 		return nil, errors.New("Unable to save nameserver settings. Please try again")
 	}
 
+	nsOwnerID := userID
+	if isAdmin {
+		nsOwnerID = domain.UserID
+	}
+
 	// 2. Save NS records in dns_records table
 	_ = s.repo.DeleteNSRecordsByDomain(domain.ID)
 	for _, ns := range cleaned {
 		rec := models.DNSRecord{
-			UserID:     userID,
+			UserID:     nsOwnerID,
 			DomainID:   domain.ID,
 			DomainName: domainName,
 			HostName:   "@",
@@ -523,15 +595,21 @@ func (s *DNSService) UpdateNameServers(userID uint, req UpdateNameServerRequest)
 }
 
 // GetNameServers retrieves the current nameservers for a domain
-func (s *DNSService) GetNameServers(userID uint, domainName string) (*NameServerResponse, error) {
+func (s *DNSService) GetNameServers(userID uint, domainName string, isAdmin bool) (*NameServerResponse, error) {
 	domainName = strings.ToLower(strings.TrimSpace(domainName))
 	if domainName == "" {
 		return nil, errors.New("Please select a domain to view nameservers")
 	}
 
-	domain, err := s.repo.GetDomainByNameAndUser(domainName, userID)
+	var domain *models.Domain
+	var err error
+	if isAdmin {
+		domain, err = s.repo.GetDomainByName(domainName)
+	} else {
+		domain, err = s.repo.GetDomainByNameAndUser(domainName, userID)
+	}
 	if err != nil {
-		return nil, errors.New("This domain was not found in your account")
+		return nil, errors.New("This domain was not found")
 	}
 
 	var nameservers []string
@@ -546,7 +624,12 @@ func (s *DNSService) GetNameServers(userID uint, domainName string) (*NameServer
 	// Check if any NS records have status
 	syncStatus := string(models.DNSSyncStatusSynced)
 	var syncError string
-	records, _ := s.repo.GetRecordsByDomainName(userID, domainName)
+	var records []models.DNSRecord
+	if isAdmin {
+		records, _ = s.repo.GetRecordsByDomainNameAdmin(domainName)
+	} else {
+		records, _ = s.repo.GetRecordsByDomainName(userID, domainName)
+	}
 	for _, r := range records {
 		if r.RecordType == models.DNSRecordTypeNS {
 			syncStatus = string(r.SyncStatus)
@@ -565,6 +648,11 @@ func (s *DNSService) GetNameServers(userID uint, domainName string) (*NameServer
 	}, nil
 }
 
+// AdminGetAllZones returns all active DNS zones across the platform
+func (s *DNSService) AdminGetAllZones() ([]DNSZoneResponse, error) {
+	return s.repo.GetAllDNSZones()
+}
+
 // syncNameServersToDNA syncs nameservers to DNA reseller API via PUT
 func (s *DNSService) syncNameServersToDNA(domainID uint, domainName string, nameServers []string) {
 	// _, err := s.reseller.UpdateNameServer(domainName, nameServers)
@@ -577,3 +665,4 @@ func (s *DNSService) syncNameServersToDNA(domainID uint, domainName string, name
 	_ = s.repo.UpdateNSRecordsSyncStatus(domainID, models.DNSSyncStatusSynced, "")
 	log.Printf("[DNS] ✅ Nameservers saved to DB successfully for %s: %v (Reseller API bypassed)", domainName, nameServers)
 }
+

@@ -1,6 +1,8 @@
 package order
 
 import (
+	"strings"
+
 	"project-setup/internal/models"
 
 	"gorm.io/gorm"
@@ -21,10 +23,10 @@ func (r *OrderRepository) CreateOrder(order *models.Order) error {
 	return r.db.Create(order).Error
 }
 
-// GetOrderByID fetches an order by primary key with items preloaded
+// GetOrderByID fetches an order by primary key with items and user preloaded
 func (r *OrderRepository) GetOrderByID(id uint) (*models.Order, error) {
 	var order models.Order
-	err := r.db.Preload("Items").First(&order, id).Error
+	err := r.db.Preload("Items").Preload("User").First(&order, id).Error
 	if err != nil {
 		return nil, err
 	}
@@ -86,38 +88,38 @@ func (r *OrderRepository) GetUserOrders(userID uint, page, limit int) ([]models.
 	return orders, total, err
 }
 
-// GetAllOrders returns a paginated list of all orders, optionally filtered by status (admin use)
-func (r *OrderRepository) GetAllOrders(page, limit int, status string) ([]models.Order, int64, error) {
+// GetAllOrders returns a paginated list of all orders with User and Items preloaded, optionally filtered by status and search
+func (r *OrderRepository) GetAllOrders(page, limit int, status string, search string) ([]models.Order, int64, error) {
 	var orders []models.Order
 	var total int64
 
-	offset := (page - 1) * limit
-	query := r.db.Model(&models.Order{})
+	query := r.db.Model(&models.Order{}).Joins("LEFT JOIN users ON users.id = orders.user_id")
 
-	if status != "" {
-		query = query.Where("status = ?", status)
+	if strings.TrimSpace(status) != "" {
+		st := strings.ToUpper(strings.TrimSpace(status))
+		query = query.Where("orders.status = ? OR orders.payment_status = ?", st, st)
 	}
 
-	query.Count(&total)
+	if strings.TrimSpace(search) != "" {
+		s := "%" + strings.ToLower(strings.TrimSpace(search)) + "%"
+		query = query.Where("LOWER(orders.order_number) LIKE ? OR LOWER(users.name) LIKE ? OR LOWER(users.email) LIKE ?", s, s, s)
+	}
 
-	err := r.db.Model(&models.Order{}).
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * limit
+	err := query.Preload("User").
 		Preload("Items").
-		Order("created_at DESC").
+		Order("orders.created_at DESC").
 		Offset(offset).
 		Limit(limit).
 		Find(&orders).Error
 
-	if status != "" {
-		err = r.db.Where("status = ?", status).
-			Preload("Items").
-			Order("created_at DESC").
-			Offset(offset).
-			Limit(limit).
-			Find(&orders).Error
-	}
-
 	return orders, total, err
 }
+
 
 // UpdateOrder saves all changes to an existing order
 func (r *OrderRepository) UpdateOrder(order *models.Order) error {

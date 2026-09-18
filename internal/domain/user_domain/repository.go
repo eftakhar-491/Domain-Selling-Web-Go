@@ -126,3 +126,65 @@ func (r *DomainRepository) GetDomainByIDAndUser(domainID uint, userID uint) (*mo
 	}
 	return &domain, nil
 }
+
+// GetDomainByID fetches a domain by ID with owner user preloaded
+func (r *DomainRepository) GetDomainByID(domainID uint) (*models.Domain, error) {
+	var domain models.Domain
+	err := r.db.Preload("User").Where("id = ?", domainID).First(&domain).Error
+	if err != nil {
+		return nil, err
+	}
+	return &domain, nil
+}
+
+// GetAllDomainsAdmin fetches all domains across the platform with owner details
+func (r *DomainRepository) GetAllDomainsAdmin(page, limit int, search string, status string) ([]models.Domain, int64, error) {
+	var domains []models.Domain
+	var total int64
+
+	query := r.db.Model(&models.Domain{}).Joins("LEFT JOIN users ON users.id = domains.user_id")
+
+	if strings.TrimSpace(search) != "" {
+		s := "%" + strings.ToLower(strings.TrimSpace(search)) + "%"
+		query = query.Where("LOWER(domains.domain_name) LIKE ? OR LOWER(users.name) LIKE ? OR LOWER(users.email) LIKE ?", s, s, s)
+	}
+
+	if strings.TrimSpace(status) != "" {
+		query = query.Where("domains.status = ?", strings.ToUpper(strings.TrimSpace(status)))
+	}
+
+	if err := query.Count(&total).Error; err != nil {
+		return nil, 0, err
+	}
+
+	offset := (page - 1) * limit
+	err := query.Preload("User").
+		Order("domains.created_at DESC").
+		Offset(offset).
+		Limit(limit).
+		Find(&domains).Error
+
+	return domains, total, err
+}
+
+// UpdateDomainStatus updates the status and auto_renew of a domain
+func (r *DomainRepository) UpdateDomainStatus(domainID uint, status string, autoRenew *bool) (*models.Domain, error) {
+	var domain models.Domain
+	if err := r.db.Preload("User").Where("id = ?", domainID).First(&domain).Error; err != nil {
+		return nil, err
+	}
+
+	if status != "" {
+		domain.Status = models.DomainStatus(strings.ToUpper(strings.TrimSpace(status)))
+	}
+	if autoRenew != nil {
+		domain.AutoRenew = *autoRenew
+	}
+
+	if err := r.db.Save(&domain).Error; err != nil {
+		return nil, err
+	}
+
+	return &domain, nil
+}
+
