@@ -97,7 +97,6 @@ func (h *UserHandler) GetAdminStats(c *echo.Context) error {
 	return utils.SuccessResponse(c, http.StatusOK, "Admin stats retrieved successfully", stats)
 }
 
-
 // UpdateProfile updates the authenticated user's own profile
 // PUT /api/v1/user/profile
 func (h *UserHandler) UpdateProfile(c *echo.Context) error {
@@ -166,4 +165,55 @@ func (h *UserHandler) DeleteUser(c *echo.Context) error {
 	}
 
 	return utils.SuccessResponse(c, http.StatusOK, "User deleted successfully", nil)
+}
+
+// ChangePassword allows an authenticated user to change their account password
+// POST /api/v1/user/change-password
+func (h *UserHandler) ChangePassword(c *echo.Context) error {
+	userID, ok := c.Get("user_id").(uint)
+	if !ok {
+		return utils.ErrorResponse(c, http.StatusUnauthorized, "Invalid user session")
+	}
+
+	var req ChangePasswordRequest
+	if err := c.Bind(&req); err != nil {
+		return utils.ErrorResponse(c, http.StatusBadRequest, "Invalid request body")
+	}
+
+	if err := c.Validate(&req); err != nil {
+		return utils.ErrorResponse(c, http.StatusBadRequest, "Validation failed: "+err.Error())
+	}
+
+	if err := h.service.ChangePassword(userID, req); err != nil {
+		return utils.ErrorResponse(c, http.StatusBadRequest, err.Error())
+	}
+
+	return utils.SuccessResponse(c, http.StatusOK, "Password changed successfully", nil)
+}
+
+// GetSystemSettings returns platform settings
+// GET /api/v1/user/admin/settings
+func (h *UserHandler) GetSystemSettings(c *echo.Context) error {
+	settings, err := h.service.GetSystemSettings()
+	if err != nil {
+		return utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+	}
+
+	return utils.SuccessResponse(c, http.StatusOK, "System settings retrieved successfully", settings)
+}
+
+// UpdateSystemSettings saves platform configuration
+// PUT /api/v1/user/admin/settings
+func (h *UserHandler) UpdateSystemSettings(c *echo.Context) error {
+	var req SystemSettingRequest
+	if err := c.Bind(&req); err != nil {
+		return utils.ErrorResponse(c, http.StatusBadRequest, "Invalid request body")
+	}
+
+	settings, err := h.service.UpdateSystemSettings(req)
+	if err != nil {
+		return utils.ErrorResponse(c, http.StatusInternalServerError, err.Error())
+	}
+
+	return utils.SuccessResponse(c, http.StatusOK, "System settings updated successfully", settings)
 }

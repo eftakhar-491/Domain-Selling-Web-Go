@@ -71,18 +71,22 @@ func (s *DiscountService) GetByID(id uint) (*models.Discount, error) {
 	return discount, nil
 }
 
-func (s *DiscountService) GetAll(page, limit int) ([]models.Discount, int64, error) {
+func (s *DiscountService) GetAll(page, limit int, search string, scope string, isActive *bool) ([]models.Discount, int64, error) {
 	if page < 1 {
 		page = 1
 	}
 	if limit < 1 || limit > 100 {
 		limit = 10
 	}
-	return s.repo.FindAll(page, limit)
+	return s.repo.FindAll(page, limit, search, scope, isActive)
 }
 
 func (s *DiscountService) GetActiveTLDDiscounts() ([]models.Discount, error) {
 	return s.repo.FindAllActiveTLD()
+}
+
+func (s *DiscountService) GetActiveDiscounts() ([]models.Discount, error) {
+	return s.repo.FindAllActive()
 }
 
 func (s *DiscountService) Update(id uint, req UpdateDiscountRequest) (*models.Discount, error) {

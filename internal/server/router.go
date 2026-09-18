@@ -5,6 +5,7 @@ import (
 
 	"project-setup/internal/domain/auth"
 	"project-setup/internal/domain/cart"
+	"project-setup/internal/domain/contact"
 	"project-setup/internal/domain/discount"
 	"project-setup/internal/domain/dns"
 	"project-setup/internal/domain/find_domain"
@@ -36,4 +37,5 @@ func Routes(r *echo.Group, db *gorm.DB, redisClient *redis.Client) {
 	cart.CartRoutes(r.Group("/cart"), db)
 	order.OrderRoutes(r.Group("/orders"), db)
 	dns.DNSRoutes(r.Group("/dns"), db)
+	contact.ContactRoutes(r.Group("/contact"), db)
 }

@@ -14,6 +14,7 @@ func DiscountRoutes(r *echo.Group, db *gorm.DB) {
 
 	// Public
 	r.GET("/tlds", handler.GetActiveTLDs)
+	r.GET("/active", handler.GetActive)
 
 	// Admin only
 	r.Use(middleware.JWTMiddleware)

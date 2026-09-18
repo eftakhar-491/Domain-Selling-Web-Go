@@ -26,6 +26,8 @@ func main() {
 		&models.OrderItem{},
 		&models.Domain{},
 		&models.DNSRecord{},
+		&models.SystemSetting{},
+		&models.ContactMessage{},
 	); err != nil {
 		log.Printf("⚠️ Auto-migrate warning: %v\n", err)
 	}

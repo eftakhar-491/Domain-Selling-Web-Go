@@ -5,6 +5,7 @@ import (
 	"math"
 
 	"project-setup/internal/models"
+	"project-setup/internal/pkg/utils"
 )
 
 // UserService handles business logic for user operations
@@ -116,7 +117,6 @@ func (s *UserService) GetAdminStats() (*AdminStatsResponse, error) {
 	return s.repo.GetAdminStats()
 }
 
-
 // UpdateProfile updates the authenticated user's own profile
 func (s *UserService) UpdateProfile(userID uint, req UpdateProfileRequest) (*ProfileResponse, error) {
 	user, err := s.repo.FindByID(userID)
@@ -187,4 +187,38 @@ func (s *UserService) DeleteUser(targetUserID uint, requestingUserID uint) error
 	}
 
 	return s.repo.Delete(targetUserID)
+}
+
+// ChangePassword allows an authenticated user to change their password
+func (s *UserService) ChangePassword(userID uint, req ChangePasswordRequest) error {
+	user, err := s.repo.FindByID(userID)
+	if err != nil {
+		return errors.New("user not found")
+	}
+
+	if !utils.CheckPassword(req.CurrentPassword, user.Password) {
+		return errors.New("incorrect current password")
+	}
+
+	hashedPassword, err := utils.HashPassword(req.NewPassword)
+	if err != nil {
+		return errors.New("failed to hash new password")
+	}
+
+	user.Password = hashedPassword
+	if err := s.repo.Update(user); err != nil {
+		return errors.New("failed to update password")
+	}
+
+	return nil
+}
+
+// GetSystemSettings returns the system settings
+func (s *UserService) GetSystemSettings() (*models.SystemSetting, error) {
+	return s.repo.GetSystemSettings()
+}
+
+// UpdateSystemSettings modifies system configurations
+func (s *UserService) UpdateSystemSettings(req SystemSettingRequest) (*models.SystemSetting, error) {
+	return s.repo.UpdateSystemSettings(req)
 }

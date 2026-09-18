@@ -37,11 +37,24 @@ func (h *DiscountHandler) Create(c *echo.Context) error {
 	return utils.SuccessResponse(c, http.StatusCreated, "Discount created successfully", discount)
 }
 
-// GetAll returns a paginated list of all discounts
-// GET /api/v1/discounts?page=1&limit=10
+// GetAll returns a paginated list of all discounts with optional search & filters
+// GET /api/v1/discounts?page=1&limit=10&q=...&scope=...&is_active=...
 func (h *DiscountHandler) GetAll(c *echo.Context) error {
 	page, _ := strconv.Atoi(c.QueryParam("page"))
 	limit, _ := strconv.Atoi(c.QueryParam("limit"))
+	search := c.QueryParam("q")
+	if search == "" {
+		search = c.QueryParam("search")
+	}
+	scope := c.QueryParam("scope")
+
+	var isActive *bool
+	if activeStr := c.QueryParam("is_active"); activeStr != "" {
+		b, err := strconv.ParseBool(activeStr)
+		if err == nil {
+			isActive = &b
+		}
+	}
 
 	if page < 1 {
 		page = 1
@@ -50,7 +63,7 @@ func (h *DiscountHandler) GetAll(c *echo.Context) error {
 		limit = 10
 	}
 
-	discounts, total, err := h.service.GetAll(page, limit)
+	discounts, total, err := h.service.GetAll(page, limit, search, scope, isActive)
 	if err != nil {
 		return utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch discounts")
 	}
@@ -124,4 +137,15 @@ func (h *DiscountHandler) GetActiveTLDs(c *echo.Context) error {
 	}
 
 	return utils.SuccessResponse(c, http.StatusOK, "Active TLD discounts retrieved", discounts)
+}
+
+// GetActive returns all currently active discounts (TLD + Coupon) for public / user viewing
+// GET /api/v1/discounts/active
+func (h *DiscountHandler) GetActive(c *echo.Context) error {
+	discounts, err := h.service.GetActiveDiscounts()
+	if err != nil {
+		return utils.ErrorResponse(c, http.StatusInternalServerError, "Failed to fetch active discounts")
+	}
+
+	return utils.SuccessResponse(c, http.StatusOK, "Active discounts retrieved successfully", discounts)
 }

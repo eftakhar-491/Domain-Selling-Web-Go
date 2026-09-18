@@ -39,9 +39,12 @@ func (r *DiscountRepository) FindActiveByTLD(tld string) (*models.Discount, erro
 	err := r.db.Where(
 		"scope = ? AND target_tld = ? AND is_active = ? AND (start_date IS NULL OR start_date <= NOW()) AND (end_date IS NULL OR end_date >= NOW())",
 		models.DiscountScopeTLD, tld, true,
-	).First(&discount).Error
+	).Limit(1).Find(&discount).Error
 	if err != nil {
 		return nil, err
+	}
+	if discount.ID == 0 {
+		return nil, nil
 	}
 	return &discount, nil
 }
@@ -55,16 +58,40 @@ func (r *DiscountRepository) FindAllActiveTLD() ([]models.Discount, error) {
 	return discounts, err
 }
 
-func (r *DiscountRepository) FindAll(page, limit int) ([]models.Discount, int64, error) {
+func (r *DiscountRepository) FindAllActive() ([]models.Discount, error) {
+	var discounts []models.Discount
+	err := r.db.Where(
+		"is_active = ? AND (start_date IS NULL OR start_date <= NOW()) AND (end_date IS NULL OR end_date >= NOW())",
+		true,
+	).Order("created_at DESC").Find(&discounts).Error
+	return discounts, err
+}
+
+func (r *DiscountRepository) FindAll(page, limit int, search string, scope string, isActive *bool) ([]models.Discount, int64, error) {
 	var discounts []models.Discount
 	var total int64
 
-	if err := r.db.Model(&models.Discount{}).Count(&total).Error; err != nil {
+	query := r.db.Model(&models.Discount{})
+
+	if search != "" {
+		s := "%" + search + "%"
+		query = query.Where("LOWER(name) LIKE LOWER(?) OR LOWER(code) LIKE LOWER(?)", s, s)
+	}
+
+	if scope != "" {
+		query = query.Where("scope = ?", scope)
+	}
+
+	if isActive != nil {
+		query = query.Where("is_active = ?", *isActive)
+	}
+
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, err
 	}
 
 	offset := (page - 1) * limit
-	if err := r.db.Offset(offset).Limit(limit).Order("created_at DESC").Find(&discounts).Error; err != nil {
+	if err := query.Offset(offset).Limit(limit).Order("created_at DESC").Find(&discounts).Error; err != nil {
 		return nil, 0, err
 	}
 

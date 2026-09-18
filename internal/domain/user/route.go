@@ -20,9 +20,12 @@ func UserRoutes(r *echo.Group, db *gorm.DB) {
 	// Routes accessible by any authenticated user
 	r.GET("/profile", userHandler.GetProfile)
 	r.PUT("/profile", userHandler.UpdateProfile)
+	r.POST("/change-password", userHandler.ChangePassword)
 
 	// Routes accessible by ADMIN and SUPERADMIN only
 	r.GET("/admin/stats", userHandler.GetAdminStats, middleware.RequireRole("ADMIN", "SUPERADMIN"))
+	r.GET("/admin/settings", userHandler.GetSystemSettings, middleware.RequireRole("ADMIN", "SUPERADMIN"))
+	r.PUT("/admin/settings", userHandler.UpdateSystemSettings, middleware.RequireRole("ADMIN", "SUPERADMIN"))
 	r.GET("", userHandler.GetUsers, middleware.RequireRole("ADMIN", "SUPERADMIN"))
 	r.PUT("/:id", userHandler.AdminUpdateUser, middleware.RequireRole("ADMIN", "SUPERADMIN"))
 	r.DELETE("/:id", userHandler.DeleteUser, middleware.RequireRole("ADMIN", "SUPERADMIN"))

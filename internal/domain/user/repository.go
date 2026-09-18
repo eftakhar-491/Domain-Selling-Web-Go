@@ -96,3 +96,81 @@ func (r *UserRepository) Delete(id uint) error {
 	return r.db.Delete(&models.User{}, id).Error
 }
 
+// GetSystemSettings retrieves the active system settings or creates defaults
+func (r *UserRepository) GetSystemSettings() (*models.SystemSetting, error) {
+	var settings models.SystemSetting
+	err := r.db.First(&settings).Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			settings = models.SystemSetting{
+				SiteName:           "Domain.BD - Digital Identity Registry",
+				SupportEmail:       "support@domain.bd",
+				Currency:           "BDT",
+				RegistrarProvider:  "BTCL",
+				RegistrarEndpoint:  "https://api.btcl.com.bd/v2/epp",
+				EppClientID:        "DOMAINBD-REG-01",
+				DefaultNameservers: "ns1.domain.bd, ns2.domain.bd",
+				DefaultTTL:         3600,
+				AutoRenewGraceDays: 30,
+				EmailAlertsEnabled: true,
+			}
+			if createErr := r.db.Create(&settings).Error; createErr != nil {
+				return nil, createErr
+			}
+			return &settings, nil
+		}
+		return nil, err
+	}
+	return &settings, nil
+}
+
+// UpdateSystemSettings updates the platform settings in database
+func (r *UserRepository) UpdateSystemSettings(req SystemSettingRequest) (*models.SystemSetting, error) {
+	settings, err := r.GetSystemSettings()
+	if err != nil {
+		return nil, err
+	}
+
+	if req.SiteName != "" {
+		settings.SiteName = req.SiteName
+	}
+	if req.SupportEmail != "" {
+		settings.SupportEmail = req.SupportEmail
+	}
+	if req.Currency != "" {
+		settings.Currency = req.Currency
+	}
+	if req.RegistrarProvider != "" {
+		settings.RegistrarProvider = req.RegistrarProvider
+	}
+	if req.RegistrarEndpoint != "" {
+		settings.RegistrarEndpoint = req.RegistrarEndpoint
+	}
+	if req.EppClientID != "" {
+		settings.EppClientID = req.EppClientID
+	}
+	if req.EppSecretKey != "" {
+		settings.EppSecretKey = req.EppSecretKey
+	}
+	if req.DefaultNameservers != "" {
+		settings.DefaultNameservers = req.DefaultNameservers
+	}
+	if req.DefaultTTL > 0 {
+		settings.DefaultTTL = req.DefaultTTL
+	}
+	if req.AutoRenewGraceDays > 0 {
+		settings.AutoRenewGraceDays = req.AutoRenewGraceDays
+	}
+	if req.EmailAlertsEnabled != nil {
+		settings.EmailAlertsEnabled = *req.EmailAlertsEnabled
+	}
+	if req.WebhookURL != "" {
+		settings.WebhookURL = req.WebhookURL
+	}
+
+	if err := r.db.Save(settings).Error; err != nil {
+		return nil, err
+	}
+
+	return settings, nil
+}

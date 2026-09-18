@@ -51,3 +51,25 @@ type AdminStatsResponse struct {
 	TotalRevenue   float64 `json:"total_revenue"`
 	TotalDiscounts int64   `json:"total_discounts"`
 }
+
+// ChangePasswordRequest represents the request body for changing password
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"current_password" validate:"required"`
+	NewPassword     string `json:"new_password" validate:"required,min=6,max=100"`
+}
+
+// SystemSettingRequest represents request body to update system configuration
+type SystemSettingRequest struct {
+	SiteName           string `json:"site_name"`
+	SupportEmail       string `json:"support_email"`
+	Currency           string `json:"currency"`
+	RegistrarProvider  string `json:"registrar_provider"`
+	RegistrarEndpoint  string `json:"registrar_endpoint"`
+	EppClientID        string `json:"epp_client_id"`
+	EppSecretKey       string `json:"epp_secret_key"`
+	DefaultNameservers string `json:"default_nameservers"`
+	DefaultTTL         int    `json:"default_ttl"`
+	AutoRenewGraceDays int    `json:"auto_renew_grace_days"`
+	EmailAlertsEnabled *bool  `json:"email_alerts_enabled"`
+	WebhookURL         string `json:"webhook_url"`
+}
