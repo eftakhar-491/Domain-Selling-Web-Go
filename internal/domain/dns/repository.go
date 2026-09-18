@@ -1,6 +1,8 @@
 package dns
 
 import (
+	"strings"
+
 	"project-setup/internal/models"
 
 	"gorm.io/gorm"
@@ -96,7 +98,7 @@ func (r *DNSRepository) DeleteRecordsByDomainName(userID uint, domainName string
 // GetDomainByNameAndUser finds a domain record by name and user (for validation)
 func (r *DNSRepository) GetDomainByNameAndUser(domainName string, userID uint) (*models.Domain, error) {
 	var domain models.Domain
-	err := r.db.Where("domain_name = ? AND user_id = ?", domainName, userID).First(&domain).Error
+	err := r.db.Where("LOWER(domain_name) = LOWER(?) AND user_id = ?", strings.ToLower(strings.TrimSpace(domainName)), userID).First(&domain).Error
 	if err != nil {
 		return nil, err
 	}
@@ -122,4 +124,3 @@ func (r *DNSRepository) UpdateNSRecordsSyncStatus(domainID uint, status models.D
 			"sync_error":  syncError,
 		}).Error
 }
-

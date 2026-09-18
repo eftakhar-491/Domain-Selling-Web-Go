@@ -321,74 +321,74 @@ func (s *DNSService) syncToDNA(domainName string, hostName string, ipInputs []IP
 	}
 
 	// Call DNA API
-	_, err := s.reseller.SyncDNSHost(domainName, hostName, dnaIPs)
+	// _, err := s.reseller.SyncDNSHost(domainName, hostName, dnaIPs)
 
-	if err != nil {
-		log.Printf("[DNS] ⚠️ DNA sync failed for %s/%s: %v", domainName, hostName, err)
-		// Mark all records as failed
-		for _, rec := range records {
-			_ = s.repo.UpdateSyncStatus(rec.ID, models.DNSSyncStatusFailed, err.Error())
-		}
-		return
-	}
+	// if err != nil {
+	// 	log.Printf("[DNS] ⚠️ DNA sync failed for %s/%s: %v", domainName, hostName, err)
+	// 	// Mark all records as failed
+	// 	for _, rec := range records {
+	// 		_ = s.repo.UpdateSyncStatus(rec.ID, models.DNSSyncStatusFailed, err.Error())
+	// 	}
+	// 	return
+	// }
 
 	// Mark all records as synced
 	for _, rec := range records {
 		_ = s.repo.UpdateSyncStatus(rec.ID, models.DNSSyncStatusSynced, "")
 	}
-	log.Printf("[DNS] ✅ All %d DNS records synced for %s/%s", len(records), domainName, hostName)
+	log.Printf("[DNS] ✅ All %d DNS records saved to local DB for %s/%s (Reseller API bypassed)", len(records), domainName, hostName)
 }
 
 // syncSingleRecordToDNA syncs a single DNS record to the DNA API via POST (create)
 func (s *DNSService) syncSingleRecordToDNA(record *models.DNSRecord) {
-	dnaIPs := []DNAIPAddressItem{
-		{
-			IPAddress: record.IPAddress,
-			IPVersion: record.IPVersion,
-		},
-	}
+	// dnaIPs := []DNAIPAddressItem{
+	// 	{
+	// 		IPAddress: record.IPAddress,
+	// 		IPVersion: record.IPVersion,
+	// 	},
+	// }
 
-	_, err := s.reseller.SyncDNSHost(record.DomainName, record.HostName, dnaIPs)
+	// _, err := s.reseller.SyncDNSHost(record.DomainName, record.HostName, dnaIPs)
 
-	if err != nil {
-		log.Printf("[DNS] ⚠️ DNA sync failed for record #%d: %v", record.ID, err)
-		_ = s.repo.UpdateSyncStatus(record.ID, models.DNSSyncStatusFailed, err.Error())
-		return
-	}
+	// if err != nil {
+	// 	log.Printf("[DNS] ⚠️ DNA sync failed for record #%d: %v", record.ID, err)
+	// 	_ = s.repo.UpdateSyncStatus(record.ID, models.DNSSyncStatusFailed, err.Error())
+	// 	return
+	// }
 
 	_ = s.repo.UpdateSyncStatus(record.ID, models.DNSSyncStatusSynced, "")
-	log.Printf("[DNS] ✅ DNS record #%d synced successfully", record.ID)
+	log.Printf("[DNS] ✅ DNS record #%d saved to DB successfully (Reseller API bypassed)", record.ID)
 }
 
 // syncUpdateToDNA syncs a DNS record update to the DNA API via PUT
 func (s *DNSService) syncUpdateToDNA(record *models.DNSRecord, domainName string, oldHostName string, newHostName string) {
-	dnaIPs := []DNAIPAddressItem{
-		{
-			IPAddress: record.IPAddress,
-			IPVersion: record.IPVersion,
-		},
-	}
+	// dnaIPs := []DNAIPAddressItem{
+	// 	{
+	// 		IPAddress: record.IPAddress,
+	// 		IPVersion: record.IPVersion,
+	// 	},
+	// }
 
-	_, err := s.reseller.UpdateDNSHost(domainName, oldHostName, newHostName, dnaIPs)
+	// _, err := s.reseller.UpdateDNSHost(domainName, oldHostName, newHostName, dnaIPs)
 
-	if err != nil {
-		log.Printf("[DNS] ⚠️ DNA PUT sync failed for record #%d: %v", record.ID, err)
-		_ = s.repo.UpdateSyncStatus(record.ID, models.DNSSyncStatusFailed, err.Error())
-		return
-	}
+	// if err != nil {
+	// 	log.Printf("[DNS] ⚠️ DNA PUT sync failed for record #%d: %v", record.ID, err)
+	// 	_ = s.repo.UpdateSyncStatus(record.ID, models.DNSSyncStatusFailed, err.Error())
+	// 	return
+	// }
 
 	_ = s.repo.UpdateSyncStatus(record.ID, models.DNSSyncStatusSynced, "")
-	log.Printf("[DNS] ✅ DNS record #%d updated via PUT successfully", record.ID)
+	log.Printf("[DNS] ✅ DNS record #%d updated in DB successfully (Reseller API bypassed)", record.ID)
 }
 
 // syncDeleteToDNA syncs a DNS record deletion to the DNA API via DELETE
 func (s *DNSService) syncDeleteToDNA(domainName string, hostName string) {
-	_, err := s.reseller.DeleteDNSHost(domainName, hostName)
-	if err != nil {
-		log.Printf("[DNS] ⚠️ DNA DELETE sync failed for %s/%s: %v", domainName, hostName, err)
-		return
-	}
-	log.Printf("[DNS] ✅ DNS host %s/%s deleted via DELETE successfully", domainName, hostName)
+	// _, err := s.reseller.DeleteDNSHost(domainName, hostName)
+	// if err != nil {
+	// 	log.Printf("[DNS] ⚠️ DNA DELETE sync failed for %s/%s: %v", domainName, hostName, err)
+	// 	return
+	// }
+	log.Printf("[DNS] ✅ DNS host %s/%s deleted from DB successfully (Reseller API bypassed)", domainName, hostName)
 }
 
 // ============================================================
@@ -417,6 +417,33 @@ func (s *DNSService) toRecordResponse(r *models.DNSRecord) DNSRecordResponse {
 // NAMESERVERS MANAGEMENT
 // ============================================================
 
+// isValidNameserverHostname validates FQDN format for nameservers
+func isValidNameserverHostname(host string) bool {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if len(host) < 3 || len(host) > 253 {
+		return false
+	}
+	if !strings.Contains(host, ".") {
+		return false
+	}
+	// Basic FQDN check: letters, digits, hyphens, dots
+	for _, char := range host {
+		if !(char >= 'a' && char <= 'z') && !(char >= '0' && char <= '9') && char != '-' && char != '.' {
+			return false
+		}
+	}
+	parts := strings.Split(host, ".")
+	if len(parts) < 2 {
+		return false
+	}
+	for _, part := range parts {
+		if len(part) == 0 || len(part) > 63 || strings.HasPrefix(part, "-") || strings.HasSuffix(part, "-") {
+			return false
+		}
+	}
+	return true
+}
+
 // UpdateNameServers updates nameservers for a domain in DB and syncs to DNA API via PUT
 func (s *DNSService) UpdateNameServers(userID uint, req UpdateNameServerRequest) (*NameServerResponse, error) {
 	domainName := strings.ToLower(strings.TrimSpace(req.DomainName))
@@ -424,16 +451,33 @@ func (s *DNSService) UpdateNameServers(userID uint, req UpdateNameServerRequest)
 		return nil, errors.New("Please provide a domain name")
 	}
 
-	// Clean nameservers list
+	// Clean & Validate nameservers list
 	var cleaned []string
+	seen := make(map[string]bool)
+
 	for _, ns := range req.NameServers {
-		trimmed := strings.TrimSpace(ns)
-		if trimmed != "" {
-			cleaned = append(cleaned, trimmed)
+		trimmed := strings.ToLower(strings.TrimSpace(ns))
+		if trimmed == "" {
+			continue
 		}
+
+		if !isValidNameserverHostname(trimmed) {
+			return nil, fmt.Errorf("Invalid nameserver hostname format: '%s'. Must be a valid FQDN (e.g., ns1.example.com)", ns)
+		}
+
+		if seen[trimmed] {
+			return nil, fmt.Errorf("Duplicate nameserver entry is not allowed: %s", ns)
+		}
+		seen[trimmed] = true
+		cleaned = append(cleaned, trimmed)
 	}
-	if len(cleaned) == 0 {
-		return nil, errors.New("Please provide at least one nameserver")
+
+	if len(cleaned) < 2 {
+		return nil, errors.New("A minimum of 2 valid nameservers are required for DNS delegation")
+	}
+
+	if len(cleaned) > 5 {
+		return nil, errors.New("A maximum of 5 nameservers are allowed")
 	}
 
 	// Verify user ownership
@@ -523,14 +567,13 @@ func (s *DNSService) GetNameServers(userID uint, domainName string) (*NameServer
 
 // syncNameServersToDNA syncs nameservers to DNA reseller API via PUT
 func (s *DNSService) syncNameServersToDNA(domainID uint, domainName string, nameServers []string) {
-	_, err := s.reseller.UpdateNameServer(domainName, nameServers)
-	if err != nil {
-		log.Printf("[DNS] ⚠️ DNA PUT nameserver sync failed for %s: %v", domainName, err)
-		_ = s.repo.UpdateNSRecordsSyncStatus(domainID, models.DNSSyncStatusFailed, err.Error())
-		return
-	}
+	// _, err := s.reseller.UpdateNameServer(domainName, nameServers)
+	// if err != nil {
+	// 	log.Printf("[DNS] ⚠️ DNA PUT nameserver sync failed for %s: %v", domainName, err)
+	// 	_ = s.repo.UpdateNSRecordsSyncStatus(domainID, models.DNSSyncStatusFailed, err.Error())
+	// 	return
+	// }
 
 	_ = s.repo.UpdateNSRecordsSyncStatus(domainID, models.DNSSyncStatusSynced, "")
-	log.Printf("[DNS] ✅ Nameservers synced to DNA API successfully for %s: %v", domainName, nameServers)
+	log.Printf("[DNS] ✅ Nameservers saved to DB successfully for %s: %v (Reseller API bypassed)", domainName, nameServers)
 }
-
