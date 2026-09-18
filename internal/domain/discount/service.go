@@ -179,7 +179,7 @@ func (s *DiscountService) CalculateItemDiscount(tld string, originalPrice float6
 	tld = strings.TrimPrefix(strings.ToLower(tld), ".")
 
 	discount, err := s.repo.FindActiveByTLD(tld)
-	if err != nil {
+	if err != nil || discount == nil {
 		return 0, ""
 	}
 
@@ -189,10 +189,17 @@ func (s *DiscountService) CalculateItemDiscount(tld string, originalPrice float6
 
 // CalculateCouponDiscount calculates the discount amount for a coupon on the cart total
 func (s *DiscountService) CalculateCouponDiscount(discount *models.Discount, cartTotal float64) float64 {
+	if discount == nil {
+		return 0
+	}
 	return calculateDiscountAmount(discount, cartTotal)
 }
 
 func calculateDiscountAmount(discount *models.Discount, base float64) float64 {
+	if discount == nil {
+		return 0
+	}
+
 	var amount float64
 
 	if discount.Type == models.DiscountTypePercentage {

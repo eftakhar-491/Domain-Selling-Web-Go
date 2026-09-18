@@ -185,41 +185,23 @@ func (rs *ResellerService) registerAndSaveDomain(userID uint, item models.OrderI
 		period = 1
 	}
 
-	log.Printf("[Reseller] Starting registration for domain: %s (user: %d)", domainName, userID)
+	log.Printf("[Reseller] Starting local domain provisioning for: %s (user: %d)", domainName, userID)
 
-	// Call DNA API to register
-	result, err := rs.RegisterDomain(domainName, period)
+	// =========================================================================
+	// NOTE: External DNA API registration call is commented out as requested.
+	// Uncomment the block below when you are ready to activate external reseller API:
+	// =========================================================================
+	// result, err := rs.RegisterDomain(domainName, period)
+	// =========================================================================
 
 	now := time.Now()
-	resellerStatus := "REGISTERED"
+	resellerStatus := "LOCAL_ACTIVE"
 	resellerDomainID := ""
-	expiresAt := now.AddDate(period, 0, 0) // default expiry
+	expiresAt := now.AddDate(period, 0, 0)
 	domainStatus := models.DomainStatusActive
 
-	if err != nil {
-		log.Printf("[Reseller] ⚠️ Registration failed for %s: %v", domainName, err)
-		resellerStatus = "FAILED"
-		domainStatus = models.DomainStatusPending
-
-		// Even if API call fails (e.g. low balance), we still create
-		// the domain record so the user can see it in their dashboard
-	} else {
-		resellerDomainID = result.DomainID
-		resellerStatus = result.Status
-		if resellerStatus == "" {
-			resellerStatus = "REGISTERED"
-		}
-
-		// Parse expiration date from API response
-		if result.ExpirationDate != "" {
-			if parsed, parseErr := time.Parse(time.RFC3339, result.ExpirationDate); parseErr == nil {
-				expiresAt = parsed
-			}
-		}
-
-		log.Printf("[Reseller] ✅ Domain registered: %s → DomainID: %s, Expires: %s",
-			domainName, resellerDomainID, expiresAt.Format("2006-01-02"))
-	}
+	log.Printf("[Reseller] 💾 Saving domain to database: %s (Status: %s, Expires: %s)",
+		domainName, domainStatus, expiresAt.Format("2006-01-02"))
 
 	// Extract TLD
 	parts := strings.Split(domainName, ".")

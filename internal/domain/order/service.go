@@ -308,9 +308,10 @@ func (s *OrderService) ConfirmPayment(userID uint, orderID uint, paymentIntentID
 			s.repo.UpdateOrder(order)
 			s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusActive)
 
-			// Register domains with DNA Reseller API
-			log.Printf("[Order] ConfirmPayment success for order #%s — triggering domain registration", order.OrderNumber)
-			s.resellerService.RegisterOrderDomains(order)
+			// Reseller API integration commented out — uncomment later when ready
+			// s.resellerService.RegisterOrderDomains(order)
+			log.Printf("[Order] ConfirmPayment success for order #%s — saving domains to DB", order.OrderNumber)
+			s.saveOrderDomainsToDB(order)
 		} else if pi.Status == stripe.PaymentIntentStatusCanceled {
 			order.Status = models.OrderStatusFailed
 			order.PaymentStatus = models.PaymentStatusFailed
@@ -324,9 +325,10 @@ func (s *OrderService) ConfirmPayment(userID uint, orderID uint, paymentIntentID
 		s.repo.UpdateOrder(order)
 		s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusActive)
 
-		// Register domains with DNA Reseller API (test/local payment)
-		log.Printf("[Order] ConfirmPayment (test) success for order #%s — triggering domain registration", order.OrderNumber)
-		s.resellerService.RegisterOrderDomains(order)
+		// Reseller API integration commented out — uncomment later when ready
+		// s.resellerService.RegisterOrderDomains(order)
+		log.Printf("[Order] ConfirmPayment (local/test) success for order #%s — saving domains to DB", order.OrderNumber)
+		s.saveOrderDomainsToDB(order)
 	}
 
 	// Re-fetch for fresh state
@@ -382,9 +384,10 @@ func (s *OrderService) handlePaymentSuccess(paymentIntentID string) error {
 
 	s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusActive)
 
-	// 🔥 Register domains with DNA Reseller API after successful payment
-	log.Printf("[Order] Payment success for order #%s — triggering domain registration", order.OrderNumber)
-	s.resellerService.RegisterOrderDomains(order)
+	// Reseller API integration commented out — uncomment later when ready
+	// s.resellerService.RegisterOrderDomains(order)
+	log.Printf("[Order] Payment success for order #%s — saving domains to DB", order.OrderNumber)
+	s.saveOrderDomainsToDB(order)
 
 	return nil
 }
@@ -508,10 +511,12 @@ func (s *OrderService) AdminUpdateOrderStatus(orderID uint, req AdminUpdateOrder
 		return nil, errors.New("failed to update order: " + err.Error())
 	}
 
-	// If marked paid, update items to active and trigger registration
+	// If marked paid, update items to active and save domains to DB
 	if order.PaymentStatus == models.PaymentStatusPaid {
 		_ = s.repo.UpdateOrderItemsStatus(order.ID, models.OrderItemStatusActive)
-		go s.resellerService.RegisterOrderDomains(order)
+		// Reseller API integration commented out — uncomment later when ready
+		// go s.resellerService.RegisterOrderDomains(order)
+		go s.saveOrderDomainsToDB(order)
 	}
 
 	fresh, _ := s.repo.GetOrderByID(order.ID)
@@ -572,7 +577,6 @@ func (s *OrderService) buildOrderResponse(order *models.Order, includeClientSecr
 	return resp
 }
 
-
 func (s *OrderService) buildOrderListResponse(orders []models.Order, total int64, page, limit int) *OrderListResponse {
 	var orderResponses []OrderResponse
 	for _, o := range orders {
@@ -611,4 +615,67 @@ func extractTLD(domain string) string {
 		return ""
 	}
 	return strings.Join(parts[1:], ".")
+}
+
+// saveOrderDomainsToDB creates/updates Domain records directly in the local database
+// upon successful order completion.
+// NOTE: Reseller API calls are bypassed as requested and can be re-enabled later.
+func (s *OrderService) saveOrderDomainsToDB(order *models.Order) {
+	if order == nil {
+		return
+	}
+
+	for _, item := range order.Items {
+		domainName := strings.ToLower(strings.TrimSpace(item.DomainName))
+		if domainName == "" {
+			continue
+		}
+
+		period := item.Period
+		if period < 1 {
+			period = 1
+		}
+
+		now := time.Now()
+		expiresAt := now.AddDate(period, 0, 0)
+
+		tld := extractTLD(domainName)
+		if tld == "" {
+			tld = "com"
+		}
+
+		// Check if domain already exists in DB
+		var existing models.Domain
+		if s.cartDB.Where("domain_name = ?", domainName).First(&existing).Error == nil {
+			// Domain already exists in DB — update active status, owner, and expiry
+			s.cartDB.Model(&existing).Updates(map[string]interface{}{
+				"user_id":         order.UserID,
+				"status":          models.DomainStatusActive,
+				"reseller_status": "LOCAL_ACTIVE",
+				"expires_at":      expiresAt,
+			})
+			log.Printf("[Order] Updated existing domain record in DB: %s (User: %d)", domainName, order.UserID)
+		} else {
+			// Create new domain record directly in database
+			newDomain := models.Domain{
+				UserID:            order.UserID,
+				DomainName:        domainName,
+				TLD:               tld,
+				Status:            models.DomainStatusActive,
+				AutoRenew:         true,
+				RegistrationDate:  now,
+				ExpiresAt:         expiresAt,
+				PrivacyProtection: true,
+				Nameservers:       "ns1.domain.bd,ns2.domain.bd",
+				ResellerDomainID:  "",
+				ResellerStatus:    "LOCAL_ACTIVE",
+			}
+
+			if err := s.cartDB.Create(&newDomain).Error; err != nil {
+				log.Printf("[Order] ❌ Failed to save domain %s to DB: %v", domainName, err)
+			} else {
+				log.Printf("[Order] 💾 Domain record saved to DB: %s (ID: %d, User: %d)", domainName, newDomain.ID, order.UserID)
+			}
+		}
+	}
 }
