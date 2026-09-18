@@ -32,20 +32,3 @@ type DomainsListResponse struct {
 	Domains []DomainResponse `json:"domains"`
 	Metrics DomainMetrics    `json:"metrics"`
 }
-
-// UpdateDomainRequest for editing domain settings
-type UpdateDomainRequest struct {
-	AutoRenew         *bool   `json:"auto_renew"`
-	Status            *string `json:"status"`
-	PrivacyProtection *bool   `json:"privacy_protection"`
-	Nameservers       *string `json:"nameservers"`
-}
-
-// CreateDomainRequest for manually adding / registering a domain
-type CreateDomainRequest struct {
-	DomainName        string `json:"domain_name" validate:"required"`
-	Period            int    `json:"period"`
-	AutoRenew         bool   `json:"auto_renew"`
-	PrivacyProtection bool   `json:"privacy_protection"`
-	Nameservers       string `json:"nameservers"`
-}

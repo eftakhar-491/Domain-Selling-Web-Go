@@ -126,18 +126,3 @@ func (r *DomainRepository) GetDomainByIDAndUser(domainID uint, userID uint) (*mo
 	}
 	return &domain, nil
 }
-
-// CreateDomain creates a new domain entry in the database
-func (r *DomainRepository) CreateDomain(domain *models.Domain) error {
-	return r.db.Create(domain).Error
-}
-
-// UpdateDomain updates an existing domain record
-func (r *DomainRepository) UpdateDomain(domain *models.Domain) error {
-	return r.db.Save(domain).Error
-}
-
-// DeleteDomain deletes a domain record
-func (r *DomainRepository) DeleteDomain(domainID uint, userID uint) error {
-	return r.db.Where("id = ? AND user_id = ?", domainID, userID).Delete(&models.Domain{}).Error
-}

@@ -18,8 +18,4 @@ func DomainRoutes(r *echo.Group, db *gorm.DB) {
 
 	r.GET("", handler.GetUserDomains)
 	r.GET("/:id", handler.GetDomainByID)
-	r.PUT("/:id", handler.UpdateDomain)
-	r.PATCH("/:id", handler.UpdateDomain)
-	r.POST("", handler.CreateDomain)
-	r.DELETE("/:id", handler.DeleteDomain)
 }
