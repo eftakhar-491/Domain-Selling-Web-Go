@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	cartpkg "project-setup/internal/domain/cart"
 	"project-setup/internal/domain/discount"
 	"project-setup/internal/models"
 	"project-setup/internal/pkg/mail"
@@ -75,7 +76,8 @@ func (s *OrderService) CheckoutFromCart(userID uint, req CreateOrderFromCartRequ
 	var orderItems []models.OrderItem
 
 	for _, item := range cart.Items {
-		originalPrice := math.Round(item.UnitPrice*float64(item.Period)*100) / 100
+		effectiveUnitPrice := cartpkg.GetEffectiveUnitPrice(item.TLD, item.UnitPrice)
+		originalPrice := math.Round(effectiveUnitPrice*float64(item.Period)*100) / 100
 		discountAmt, _ := s.discountService.CalculateItemDiscount(item.TLD, originalPrice)
 		finalPrice := math.Max(0, originalPrice-discountAmt)
 		finalPrice = math.Round(finalPrice*100) / 100
@@ -87,7 +89,7 @@ func (s *OrderService) CheckoutFromCart(userID uint, req CreateOrderFromCartRequ
 			DomainName:     item.DomainName,
 			TLD:            item.TLD,
 			Period:         item.Period,
-			UnitPrice:      item.UnitPrice,
+			UnitPrice:      effectiveUnitPrice,
 			DiscountAmount: discountAmt,
 			FinalPrice:     finalPrice,
 			Currency:       currency,
@@ -204,7 +206,8 @@ func (s *OrderService) CreateDirectOrder(userID uint, req DirectOrderRequest) (*
 			return nil, fmt.Errorf("invalid domain name: %s", item.DomainName)
 		}
 
-		originalPrice := math.Round(item.UnitPrice*float64(item.Period)*100) / 100
+		effectiveUnitPrice := cartpkg.GetEffectiveUnitPrice(tld, item.UnitPrice)
+		originalPrice := math.Round(effectiveUnitPrice*float64(item.Period)*100) / 100
 		discountAmt, _ := s.discountService.CalculateItemDiscount(tld, originalPrice)
 		finalPrice := math.Max(0, originalPrice-discountAmt)
 		finalPrice = math.Round(finalPrice*100) / 100
@@ -216,7 +219,7 @@ func (s *OrderService) CreateDirectOrder(userID uint, req DirectOrderRequest) (*
 			DomainName:     domainName,
 			TLD:            tld,
 			Period:         item.Period,
-			UnitPrice:      item.UnitPrice,
+			UnitPrice:      effectiveUnitPrice,
 			DiscountAmount: discountAmt,
 			FinalPrice:     finalPrice,
 			Currency:       currency,

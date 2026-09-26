@@ -51,6 +51,9 @@ func (s *CartService) AddToCart(userID uint, req AddToCartRequest) (*CartSummary
 		return nil, errors.New("failed to load cart")
 	}
 
+	// Enforce profit margin on unit price
+	req.UnitPrice = GetEffectiveUnitPrice(tld, req.UnitPrice)
+
 	// Check if domain already in cart
 	existing, _ := s.repo.FindItemByDomain(cart.ID, domainName)
 	if existing != nil {
@@ -191,7 +194,8 @@ func (s *CartService) buildCartSummary(cart *models.Cart) *CartSummaryResponse {
 	currency := "USD"
 
 	for _, item := range cart.Items {
-		originalPrice := item.UnitPrice * float64(item.Period)
+		effectiveUnitPrice := GetEffectiveUnitPrice(item.TLD, item.UnitPrice)
+		originalPrice := effectiveUnitPrice * float64(item.Period)
 		originalPrice = math.Round(originalPrice*100) / 100
 
 		discountAmount, discountName := s.discountService.CalculateItemDiscount(item.TLD, originalPrice)
@@ -207,7 +211,7 @@ func (s *CartService) buildCartSummary(cart *models.Cart) *CartSummaryResponse {
 			DomainName:     item.DomainName,
 			TLD:            item.TLD,
 			Period:         item.Period,
-			UnitPrice:      item.UnitPrice,
+			UnitPrice:      effectiveUnitPrice,
 			OriginalPrice:  originalPrice,
 			DiscountAmount: discountAmount,
 			DiscountName:   discountName,
@@ -252,11 +256,54 @@ func (s *CartService) buildCartSummary(cart *models.Cart) *CartSummaryResponse {
 func (s *CartService) calculateSubtotalAfterTLD(cart *models.Cart) float64 {
 	var total float64
 	for _, item := range cart.Items {
-		originalPrice := item.UnitPrice * float64(item.Period)
+		effectiveUnitPrice := GetEffectiveUnitPrice(item.TLD, item.UnitPrice)
+		originalPrice := effectiveUnitPrice * float64(item.Period)
 		discountAmount, _ := s.discountService.CalculateItemDiscount(item.TLD, originalPrice)
 		total += originalPrice - discountAmount
 	}
 	return math.Round(total*100) / 100
+}
+
+const profitMarginUSD = 4.99
+
+var tldWholesaleBasePrices = map[string]float64{
+	"com":   10.00,
+	"net":   11.00,
+	"org":   10.00,
+	"xyz":   2.00,
+	"io":    35.00,
+	"dev":   14.00,
+	"ai":    65.00,
+	"co":    24.00,
+	"info":  15.00,
+	"biz":   13.00,
+	"me":    16.00,
+	"app":   14.00,
+	"cloud": 10.00,
+}
+
+// GetEffectiveUnitPrice guarantees that every domain unit price includes the 4.99 USD profit margin.
+// It prevents raw wholesale prices or legacy lower prices (e.g. 12.0) from bypassing profit logic.
+func GetEffectiveUnitPrice(tld string, inputPrice float64) float64 {
+	cleanTLD := strings.ToLower(strings.TrimPrefix(strings.TrimSpace(tld), "."))
+	baseCost, ok := tldWholesaleBasePrices[cleanTLD]
+	if !ok {
+		baseCost = 10.00 // Default wholesale benchmark
+	}
+	minRequired := math.Round((baseCost+profitMarginUSD)*100) / 100
+
+	if inputPrice <= 0 {
+		return minRequired
+	}
+	// If input price is at or below raw wholesale cost, add the $4.99 profit margin
+	if inputPrice <= baseCost {
+		return math.Round((inputPrice+profitMarginUSD)*100) / 100
+	}
+	// If input price is less than minimum allowed price with profit, elevate to minRequired
+	if inputPrice < minRequired {
+		return minRequired
+	}
+	return math.Round(inputPrice*100) / 100
 }
 
 // extractTLD extracts the TLD from a domain name
