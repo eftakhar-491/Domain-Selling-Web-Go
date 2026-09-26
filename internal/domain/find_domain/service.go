@@ -7,12 +7,17 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// Profit margin added on top of vendor wholesale domain prices
+const profitMarginUSD = 4.99
 
 // DomainService handles domain search business logic
 type DomainService struct {
@@ -118,27 +123,104 @@ func sanitizeFullDomain(query string) string {
 	return strings.Join(cleanParts, ".")
 }
 
+// roundTwoDecimals rounds a float to 2 decimal places
+func roundTwoDecimals(val float64) float64 {
+	return math.Round(val*100) / 100
+}
+
+func isPriceKey(key string) bool {
+	k := strings.ToLower(key)
+	if strings.Contains(k, "discount") {
+		return false
+	}
+	return k == "price" ||
+		k == "renewprice" ||
+		k == "transferprice" ||
+		k == "registerprice" ||
+		k == "regularprice" ||
+		k == "unitprice" ||
+		k == "unit_price" ||
+		k == "renew_price" ||
+		k == "transfer_price" ||
+		k == "register_price" ||
+		k == "originalprice" ||
+		k == "original_price"
+}
+
+// addProfitMargin recursively adjusts domain price fields by adding profitMarginUSD (4.99)
+func addProfitMargin(data interface{}) interface{} {
+	switch v := data.(type) {
+	case map[string]interface{}:
+		result := make(map[string]interface{}, len(v))
+		for k, val := range v {
+			if isPriceKey(k) {
+				switch num := val.(type) {
+				case float64:
+					if num > 0 {
+						result[k] = roundTwoDecimals(num + profitMarginUSD)
+					} else {
+						result[k] = num
+					}
+				case int:
+					if num > 0 {
+						result[k] = roundTwoDecimals(float64(num) + profitMarginUSD)
+					} else {
+						result[k] = num
+					}
+				case json.Number:
+					if f, err := num.Float64(); err == nil && f > 0 {
+						result[k] = roundTwoDecimals(f + profitMarginUSD)
+					} else {
+						result[k] = val
+					}
+				case string:
+					s := strings.TrimSpace(num)
+					s = strings.TrimPrefix(s, "$")
+					if f, err := strconv.ParseFloat(s, 64); err == nil && f > 0 {
+						result[k] = roundTwoDecimals(f + profitMarginUSD)
+					} else {
+						result[k] = val
+					}
+				default:
+					result[k] = addProfitMargin(val)
+				}
+			} else {
+				result[k] = addProfitMargin(val)
+			}
+		}
+		return result
+	case []interface{}:
+		result := make([]interface{}, len(v))
+		for i, item := range v {
+			result[i] = addProfitMargin(item)
+		}
+		return result
+	default:
+		return data
+	}
+}
+
 // generateFallbackBulkResults creates safe fallback search results if upstream registry is temporarily unreachable
 func generateFallbackBulkResults(domain string) map[string]interface{} {
 	var infos []map[string]interface{}
 	for _, tld := range supportedTLDs {
 		ext := strings.ToUpper(strings.TrimPrefix(tld, "."))
-		var price float64 = 12.99
+		var price float64 = 8.00
 		switch tld {
 		case ".com":
-			price = 14.99
+			price = 10.00
 		case ".net":
-			price = 13.50
+			price = 11.00
 		case ".org":
-			price = 12.99
+			price = 10.00
 		case ".xyz":
-			price = 3.99
+			price = 2.00
 		case ".io":
-			price = 39.99
+			price = 35.00
 		case ".dev":
-			price = 15.99
+			price = 14.00
 		case ".ai":
-			price = 69.99
+			price = 65.00
 		}
 
 		infos = append(infos, map[string]interface{}{
@@ -211,12 +293,12 @@ func (s *DomainService) Search(query string) (interface{}, error) {
 	resp, err := s.client.Do(req)
 	if err != nil {
 		log.Printf("⚠️ Domain API search connection error: %v\n", err)
-		return map[string]interface{}{
+		return addProfitMargin(map[string]interface{}{
 			"domainName": domain,
 			"status":     "AVAILABLE",
-			"price":      14.99,
+			"price":      10.00,
 			"currency":   "USD",
-		}, nil
+		}), nil
 	}
 	defer resp.Body.Close()
 
@@ -227,12 +309,12 @@ func (s *DomainService) Search(query string) (interface{}, error) {
 
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		log.Printf("⚠️ Domain API returned status %d: %s\n", resp.StatusCode, string(body))
-		return map[string]interface{}{
+		return addProfitMargin(map[string]interface{}{
 			"domainName": domain,
 			"status":     "AVAILABLE",
-			"price":      14.99,
+			"price":      10.00,
 			"currency":   "USD",
-		}, nil
+		}), nil
 	}
 
 	var result interface{}
@@ -240,7 +322,7 @@ func (s *DomainService) Search(query string) (interface{}, error) {
 		return nil, fmt.Errorf("failed to parse domain API response: %w", err)
 	}
 
-	return result, nil
+	return addProfitMargin(result), nil
 }
 
 func (s *DomainService) BulkSearch(query string) (interface{}, error) {
@@ -295,7 +377,7 @@ func (s *DomainService) BulkSearch(query string) (interface{}, error) {
 	resp, err := s.client.Do(req)
 	if err != nil {
 		log.Printf("⚠️ Domain API connection error: %v. Returning fallback results.\n", err)
-		return generateFallbackBulkResults(domain), nil
+		return addProfitMargin(generateFallbackBulkResults(domain)), nil
 	}
 	defer resp.Body.Close()
 
@@ -307,14 +389,14 @@ func (s *DomainService) BulkSearch(query string) (interface{}, error) {
 	// If upstream API returned non-200 (like 500 error on unsupported query), provide resilient fallback results
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		log.Printf("⚠️ Upstream domain API error [Status %d]: %s. Providing fallback results.\n", resp.StatusCode, string(body))
-		return generateFallbackBulkResults(domain), nil
+		return addProfitMargin(generateFallbackBulkResults(domain)), nil
 	}
 
 	var result interface{}
 	if err := json.Unmarshal(body, &result); err != nil {
 		log.Printf("⚠️ Failed to parse domain API response: %v. Providing fallback results.\n", err)
-		return generateFallbackBulkResults(domain), nil
+		return addProfitMargin(generateFallbackBulkResults(domain)), nil
 	}
 
-	return result, nil
+	return addProfitMargin(result), nil
 }

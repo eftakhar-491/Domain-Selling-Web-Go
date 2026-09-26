@@ -22,3 +22,4 @@ vendor/
 *.swo
 
 token.md
+.gocache/
